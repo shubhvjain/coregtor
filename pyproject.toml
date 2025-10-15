@@ -1,0 +1,16 @@
+[project]
+name = "coregtor"
+version = "0.1.0"
+description = "A tool to predict transcription co-regulators for a gene from gene expression data using random forest methods"
+authors = [{name = "Shubh Vardhan Jain", email = "shubhvjain@gmail.com"}]
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "scikit-learn (>=1.7.2,<2.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
