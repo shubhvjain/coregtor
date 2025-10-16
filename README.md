@@ -1,1 +1,3 @@
-# Predict gene co regulator from gene expressing data using `corRegTor`
+# Predict transcription gene co regulator from gene expressing data using `coRegTor`
+
+The cell uses the information in the genome to generate proteins. This process has 2 steps. Step one is conversion of DNA into an mRNA (messenger RNA). This process is called Transcription. In the second step, called translation, the mRNa is "translated" into proteins. Both steps involved many sub steps. The process is complex and is regulated at each step in the way.  
