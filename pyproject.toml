@@ -20,4 +20,5 @@ sphinx = "^8.2.3"
 myst-nb = "^1.3.0"
 jupyter = "^1.1.1"
 sphinx-autodoc-typehints = "^3.5.1"
+sphinx-book-theme = "^1.1.4"
 

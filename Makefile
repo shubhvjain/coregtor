@@ -1,3 +1,5 @@
+# this file is to generate the documentation site locally for testing
+
 .PHONY: docs docs-clean
 
 docs:
