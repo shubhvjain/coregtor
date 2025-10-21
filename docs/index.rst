@@ -6,11 +6,8 @@
 CoRegTor documentation
 ======================
 
-Add your content using ``reStructuredText`` syntax. See the
-`reStructuredText <https://www.sphinx-doc.org/en/master/usage/restructuredtext/index.html>`_
-documentation for details.
+This is the documentation for CoRegTor`, which stands for CO-REulators of a Gene predicTOR, a bioinformatics tool to predict transcription co-regulator for a gene from gene expression data using random forest methods.
 
-This is the documentation for `coregtor`, a bioinformatics tool to predict transcription co-regulator for a gene from gene expression data using random forest. methods.
 
 .. toctree::
    :maxdepth: 2
