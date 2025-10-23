@@ -93,7 +93,7 @@ def read_gct(file_path: PathLike) -> pd.DataFrame:
 
 
 
-def create_model_input(raw_ge_data: pd.DataFrame,target_gene:str,tf_factors:pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def create_model_input(raw_ge_data: pd.DataFrame,target_gene:str,t_factors:pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Prepare gene expression data for training.
 
@@ -102,7 +102,7 @@ def create_model_input(raw_ge_data: pd.DataFrame,target_gene:str,tf_factors:pd.D
     Args:
       raw_ge_data (pd.DataFrame) : Gene expression data in samples x genes format 
       target_gene (str) :  Name of the target gene to predict. Must be present in raw_ge_data columns
-      tf_factors (pd.DataFrame) :  A DataFrame containing transcription factor gene names. It must have a column named 'gene_name' listing the TF genes. This DataFrame is used to filter the input gene expression data. 
+      t_factors (pd.DataFrame) :  A DataFrame containing transcription factor gene names. It must have a column named 'gene_name' listing the TF genes. This DataFrame is used to filter the input gene expression data. 
       
     Returns:
       tuple[pd.DataFrame, pd.DataFrame] :  X - Feature matrix (samples x genes) excluding target gene; Y - Target vector (samples x 1) containing only target gene expression
@@ -120,7 +120,7 @@ def create_model_input(raw_ge_data: pd.DataFrame,target_gene:str,tf_factors:pd.D
     Y = raw_ge_data[[target_gene]]
 
     # Get the list of TFs to keep
-    tf_list = tf_factors['gene_name'].tolist()
+    tf_list = t_factors['gene_name'].tolist()
 
     # Filter only TF columns present in raw_ge_data, excluding the target gene
     X_cols = [gene for gene in tf_list if gene in raw_ge_data.columns and gene != target_gene]
