@@ -15,7 +15,7 @@ from sklearn.tree import _tree
 from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor
 from typing import List, Dict, Any,Union, Optional
 from pathlib import Path
-from coregtor._expression import create_model_input
+from coregtor.expression import create_model_input
 
 PathLike = Union[str, Path]
 

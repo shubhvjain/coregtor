@@ -1,7 +1,7 @@
-from coregtor._expression import read,create_model_input
-from coregtor._forest import create_model,tree_paths
-from coregtor._context import create_context,transform_context,compare_context
-from coregtor._clusters import plot_dendrogram, plot_cophenetic, identify_coregulators
+from coregtor.expression import read,create_model_input
+from coregtor.forest import create_model,tree_paths
+from coregtor.context import create_context,transform_context,compare_context
+from coregtor.clusters import plot_dendrogram, plot_cophenetic, identify_coregulators
 
 import coregtor.figure as figure
 
