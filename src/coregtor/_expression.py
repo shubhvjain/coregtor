@@ -11,14 +11,13 @@ import os
 # Type aliases for better readability
 PathLike = Union[str, Path]
 
-def read(file_path:PathLike,tf_file_path:PathLike=None):
+def read(file_path:PathLike):
     """ Read Gene expression data from a file and prepare it for further processing. 
     
     This method reads the given file and generate the input for further analysis. The methods include many options for processing data from various formats. 
     
     Args:
         file_path (Path or str) : Path to the file. Valid file types : .gct
-        tf_file_path (str or Path) :  (Optional) Path to file containing transcription factor gene names. Should be a single-column file with gene names (no header).
     Returns:
         pd.DataFrame : A pandas dataframe with columns are genes and rows are samples/cells. 
 
@@ -31,17 +30,17 @@ def read(file_path:PathLike,tf_file_path:PathLike=None):
     else:
       print("Unknown file type:", ext)
     
-    if tf_file_path:
-      # transcription factor list provided filter the data 
-      tf_file_path = Path(tf_file_path).expanduser()
-      if not tf_file_path.exists():
-          raise FileNotFoundError(f"Transcription factor list not found: {tf_file_path}")
+    # if tf_file_path:
+    #   # transcription factor list provided filter the data 
+    #   tf_file_path = Path(tf_file_path).expanduser()
+    #   if not tf_file_path.exists():
+    #       raise FileNotFoundError(f"Transcription factor list not found: {tf_file_path}")
         
-      # Read transcription factor gene list
-      tf_genes = pd.read_csv(tf_file_path, names=["gene_name"], header=None)["gene_name"]
+    #   # Read transcription factor gene list
+    #   tf_genes = pd.read_csv(tf_file_path, names=["gene_name"], header=None)["gene_name"]
         
-      # Filter genes to TF list only
-      ge_data = ge_data[ge_data.index.isin(tf_genes)]
+    #    # Filter genes to TF list only
+    #  ge_data = ge_data[ge_data.index.isin(tf_genes)]
 
     ge_data = ge_data.transpose().rename_axis("sample_name")
     return ge_data

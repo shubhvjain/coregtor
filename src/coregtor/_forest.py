@@ -19,7 +19,7 @@ from coregtor._expression import create_model_input
 
 PathLike = Union[str, Path]
 
-def create_model(X,Y,model="rf",model_options=None):
+def create_model(X,Y,model="rf",model_options={"max_depth":5,"n_estimators":1000}):
     """
     Train an ensemble regression model to predict the expression of a target gene  using transcription factors in the gene expression data as input features.
 
