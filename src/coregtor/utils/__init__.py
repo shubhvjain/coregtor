@@ -1,7 +1,3 @@
-"""
-Gene Expression Data Input/Output and Preprocessing Utilities
-This module provides  utilities for reading, processing, and preparing gene expression data 
-"""
 
 import pandas as pd
 from pathlib import Path
@@ -11,7 +7,7 @@ import os
 # Type aliases for better readability
 PathLike = Union[str, Path]
 
-def read(file_path:PathLike):
+def read_GE_data(file_path:PathLike):
     """ Read Gene expression data from a file and prepare it for further processing. 
     
     This method reads the given file and generate the input for further analysis. The methods include many options for processing data from various formats. 
@@ -90,39 +86,3 @@ def read_gct(file_path: PathLike) -> pd.DataFrame:
     except Exception as e:
         raise ValueError(f"Error reading GCT file {file_path}: {str(e)}")
 
-
-
-def create_model_input(raw_ge_data: pd.DataFrame,target_gene:str,t_factors:pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Prepare gene expression data for training.
-
-    This function splits the gene expression DataFrame into features (X) and target (Y) for supervised learning.
-    
-    Args:
-      raw_ge_data (pd.DataFrame) : Gene expression data in samples x genes format 
-      target_gene (str) :  Name of the target gene to predict. Must be present in raw_ge_data columns
-      t_factors (pd.DataFrame) :  A DataFrame containing transcription factor gene names. It must have a column named 'gene_name' listing the TF genes. This DataFrame is used to filter the input gene expression data. 
-      
-    Returns:
-      tuple[pd.DataFrame, pd.DataFrame] :  X - Feature matrix (samples x genes) excluding target gene; Y - Target vector (samples x 1) containing only target gene expression
-    
-    """
-    # Check if raw_ge_data is empty
-    if raw_ge_data.empty:
-        raise ValueError("The gene expression data (raw_ge_data) is empty.")
-
-    # Check if target_gene is in raw_ge_data columns
-    if target_gene not in raw_ge_data.columns:
-        raise ValueError(f"Target gene '{target_gene}' not found in gene expression data columns.")
-
-    # Extract the target vector Y
-    Y = raw_ge_data[[target_gene]]
-
-    # Get the list of TFs to keep
-    tf_list = t_factors['gene_name'].tolist()
-
-    # Filter only TF columns present in raw_ge_data, excluding the target gene
-    X_cols = [gene for gene in tf_list if gene in raw_ge_data.columns and gene != target_gene]
-    X = raw_ge_data[X_cols]
-
-    return X, Y
