@@ -3,6 +3,12 @@ import pandas as pd
 from pathlib import Path
 from typing import Union
 import os
+import json
+from datetime import datetime
+import time
+import numpy as np
+
+import coregtor.utils.plot
 
 # Type aliases for better readability
 PathLike = Union[str, Path]
@@ -86,3 +92,141 @@ def read_gct(file_path: PathLike) -> pd.DataFrame:
     except Exception as e:
         raise ValueError(f"Error reading GCT file {file_path}: {str(e)}")
 
+
+def save_exp_results(
+    options,
+    input_config,
+    sim_matrix,
+    results,
+    runtimes,
+    base_path=None,
+    output_subdir="experiments"
+):
+    """
+    Save experiment results to JSON file
+    
+    Parameters:
+    -----------
+    options : dict
+        Experiment configuration options (including notes)
+    input_config : dict
+        Dictionary with data_file_path, data_description, tf_file_path
+    sim_matrix : pandas.DataFrame
+        Similarity matrix from analysis
+    results : pandas.DataFrame
+        Results from identify_coregulators
+    base_path : Path, optional
+        Base directory path (uses current directory if None)
+    output_subdir : str
+        Subdirectory name within base_path (default: "experiments")
+    
+    Returns:
+    --------
+    str : Path to saved file
+    """
+    
+    # Create output directory inside base_path
+    if base_path is None:
+        base_path = Path(".")
+    
+    output_path = Path(base_path) / output_subdir
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    # Generate experiment ID and timestamp
+    expid = int(time.time())
+    file_created_on = datetime.now().isoformat()
+    
+    # Convert all Path objects in input_config to strings
+    input_serialized = {}
+    for key, value in input_config.items():
+        if isinstance(value, Path):
+            input_serialized[key] = str(value)
+        else:
+            input_serialized[key] = value
+     
+    # Prepare the experiment data
+    exp_data = {
+        "expid": expid,
+        "title": f"Coregulators for gene {options['target_gene']}",
+        "file_created_on": file_created_on,
+        "options": options,
+        "input": input_serialized,
+        "runtimes": runtimes,
+        "similarity_matrix": None,
+        "results": None
+    }
+    
+    # Convert similarity matrix to list
+    if isinstance(sim_matrix, pd.DataFrame):
+        exp_data["similarity_matrix"] = {
+            "data": sim_matrix.values.tolist(),
+            "index": sim_matrix.index.tolist(),
+            "columns": sim_matrix.columns.tolist()
+        }
+    
+    # Convert results to serializable format
+    if isinstance(results, pd.DataFrame):
+        exp_data["results"] = results.to_dict(orient='records')
+   
+    # Save to JSON file
+    output_file = output_path / f"exp_{expid}_{options['target_gene']}.json"
+    with open(output_file, 'w') as f:
+        json.dump(exp_data, f, indent=2)
+    
+    print(f"Experiment saved successfully!")
+    print(f"File: {output_file}")
+    print(f"Experiment ID: {expid}")
+    print(f"Target gene: {options['target_gene']}")
+    
+    return str(output_file)
+
+
+def load_exp_file(file_path):
+    """
+    Load experiment results from JSON file
+    
+    Parameters:
+    -----------
+    file_path : str or Path
+        Path to the experiment JSON file
+    
+    Returns:
+    --------
+    dict : Dictionary containing all experiment data with keys:
+        - expid: Experiment ID
+        - title: Experiment title
+        - file_created_on: Creation timestamp
+        - options: Experiment configuration (including notes)
+        - input: Input file paths and descriptions
+        - similarity_matrix: Reconstructed similarity matrix as DataFrame
+        - results: Results as DataFrame
+    """
+    
+    with open(file_path, 'r') as f:
+        exp_data = json.load(f)
+    
+    # Reconstruct similarity matrix as DataFrame
+    if exp_data["similarity_matrix"] and "data" in exp_data["similarity_matrix"]:
+        sim_data = exp_data["similarity_matrix"]["data"]
+        sim_index = exp_data["similarity_matrix"]["index"]
+        sim_columns = exp_data["similarity_matrix"]["columns"]
+        
+        exp_data["similarity_matrix"] = pd.DataFrame(
+            sim_data,
+            index=sim_index,
+            columns=sim_columns
+        )
+    
+    # Convert results back to DataFrame
+    if exp_data["results"] and isinstance(exp_data["results"], list):
+        if len(exp_data["results"]) > 0:
+            exp_data["results"] = pd.DataFrame(exp_data["results"])
+    
+    print(f"Experiment loaded successfully!")
+    print(f"Title: {exp_data['title']}")
+    print(f"Experiment ID: {exp_data['expid']}")
+    print(f"Created on: {exp_data['file_created_on']}")
+    print(f"Target gene: {exp_data['options']['target_gene']}")
+
+    
+    return exp_data
