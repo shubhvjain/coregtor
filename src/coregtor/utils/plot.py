@@ -9,8 +9,10 @@ from scipy.cluster.hierarchy import linkage, dendrogram as scipy_dendrogram, cop
 from scipy.spatial.distance import squareform
 from sklearn.linear_model import QuantileRegressor
 from typing import Tuple, List, Optional, Dict
-
-
+import networkx as nx
+import hashlib
+from matplotlib.lines import Line2D
+from matplotlib.patches import Circle, Polygon
 #------------------
 # Visualize modules
 #------------------
@@ -145,3 +147,156 @@ def cophenetic(
         plt.show()
     
     return fig, axes, ccc_dict, suggested_threshold
+
+
+def get_color_from_hash(text):
+    """Generate a consistent color from a text hash."""
+    hash_obj = hashlib.md5(text.encode())
+    hash_hex = hash_obj.hexdigest()
+    r = int(hash_hex[0:2], 16) / 255
+    g = int(hash_hex[2:4], 16) / 255
+    b = int(hash_hex[4:6], 16) / 255
+    return (r, g, b)
+
+def preprocess_edges(edges: pd.DataFrame) -> pd.DataFrame:
+    """Add color and label columns to edges DataFrame."""
+    edges = edges.copy()
+    
+    # Check if edge_type and edge_source columns exist
+    has_edge_type = 'edge_type' in edges.columns
+    has_edge_source = 'edge_source' in edges.columns
+    
+    if has_edge_type and has_edge_source:
+        edges['label'] = edges['edge_type'] + ' + ' + edges['edge_source']
+        edges['color'] = edges.apply(
+            lambda row: get_color_from_hash(f"{row['edge_type']}_{row['edge_source']}"), 
+            axis=1
+        )
+    elif has_edge_type:
+        edges['label'] = edges['edge_type']
+        edges['color'] = edges['edge_type'].apply(get_color_from_hash)
+    elif has_edge_source:
+        edges['label'] = edges['edge_source']
+        edges['color'] = edges['edge_source'].apply(get_color_from_hash)
+    else:
+        edges['label'] = 'default'
+        edges['color'] = [(0, 0, 1)] * len(edges)  # Blue default
+    
+    return edges
+
+def cluster_target_edges(cluster_nodes: list, target_n: str, edges: pd.DataFrame, 
+                        title="Cluster edges", caption=None):
+    """
+    Plot a cluster graph with cluster nodes distributed in area and target node outside.
+    
+    Parameters:
+    - cluster_nodes: list of nodes in the cluster
+    - target_n: the target node (outside the circle)
+    - edges: DataFrame with columns ['node1', 'node2', optional: 'edge_type', 'edge_source']
+    - title: Title for the plot
+    - caption: Optional caption text
+    """
+    # Preprocess edges to add color and label
+    edges = preprocess_edges(edges)
+    
+    # Create graph
+    G = nx.Graph()
+    G.add_nodes_from(cluster_nodes)
+    G.add_node(target_n)
+    
+    # Separate edges
+    within_cluster = []
+    to_target = []
+    
+    for _, row in edges.iterrows():
+        node1, node2 = row['node1'], row['node2']
+        
+        if node1 in cluster_nodes and node2 in cluster_nodes:
+            within_cluster.append(row)
+            G.add_edge(node1, node2)
+        elif (node1 in cluster_nodes and node2 == target_n) or \
+             (node2 in cluster_nodes and node1 == target_n):
+            to_target.append(row)
+            G.add_edge(node1, node2)
+    
+    # Create layout
+    n_nodes = len(cluster_nodes)
+    pos = {}
+    
+    if n_nodes <= 25:
+        pos = nx.circular_layout(cluster_nodes, scale=1.5)
+        target_offset = 3.0
+    else:
+        nodes_per_ring = 15
+        n_rings = int(np.ceil(n_nodes / nodes_per_ring))
+        node_idx = 0
+        
+        for ring in range(n_rings):
+            remaining = n_nodes - node_idx
+            nodes_in_ring = min(nodes_per_ring, remaining)
+            radius = 0.8 + ring * 0.6
+            
+            for i in range(nodes_in_ring):
+                if node_idx < n_nodes:
+                    angle = 2 * np.pi * i / nodes_in_ring
+                    pos[cluster_nodes[node_idx]] = np.array([radius * np.cos(angle), 
+                                                             radius * np.sin(angle)])
+                    node_idx += 1
+        
+        target_offset = 0.8 + (n_rings - 1) * 0.6 + 1.5
+    
+    pos[target_n] = np.array([target_offset, 0])
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(14, 12))
+    
+    # Draw nodes
+    nx.draw_networkx_nodes(G, pos, nodelist=cluster_nodes, 
+                          node_color='lightblue', node_size=400, ax=ax)
+    nx.draw_networkx_nodes(G, pos, nodelist=[target_n], 
+                          node_color='orange', node_size=700, ax=ax)
+    
+    # Draw edges
+    for row in within_cluster:
+        nx.draw_networkx_edges(G, pos, 
+                              edgelist=[(row['node1'], row['node2'])], 
+                              edge_color=[row['color']], 
+                              width=1.5, alpha=0.6, style='solid', ax=ax)
+    
+    for row in to_target:
+        nx.draw_networkx_edges(G, pos, 
+                              edgelist=[(row['node1'], row['node2'])], 
+                              edge_color=[row['color']], 
+                              width=1.5, alpha=0.7, style='dashed', ax=ax)
+    
+    # Draw labels
+    font_size = 8 if n_nodes > 25 else 9
+    nx.draw_networkx_labels(G, pos, font_size=font_size, font_weight='bold', ax=ax)
+    
+    plt.title(title, fontsize=14, fontweight='bold', pad=20)
+    if caption:
+        plt.figtext(0.5, 0.02, caption, wrap=True, 
+                   horizontalalignment='center', fontsize=10, style='italic')
+    
+    # Create legend
+    legend_elements = [
+        Line2D([0], [0], marker='o', color='w', markerfacecolor='lightblue', 
+               markersize=10, label='Cluster Nodes'),
+        Line2D([0], [0], marker='o', color='w', markerfacecolor='orange', 
+               markersize=12, label='Target Node'),
+    ]
+    
+    # Get unique edge types for legend
+    unique_edges = edges[['label', 'color']].drop_duplicates().sort_values('label')
+    if len(unique_edges) > 0 and unique_edges['label'].iloc[0] != 'default':
+        legend_elements.append(Line2D([0], [0], color='none', label=''))
+        for _, edge_row in unique_edges.iterrows():
+            legend_elements.append(
+                Line2D([0], [0], color=edge_row['color'], linewidth=2.5, 
+                       label=f"  {edge_row['label']}")
+            )
+        
+    ax.legend(handles=legend_elements, loc='best', fontsize=9, framealpha=0.9)
+    plt.axis('off')
+    plt.tight_layout()
+    plt.show()
