@@ -18,5 +18,10 @@ DATA_SOURCES = {
         "url": "http://www.ensembl.org/biomart/martservice?query=<?xml version='1.0' encoding='UTF-8'?><!DOCTYPE Query><Query virtualSchemaName='default' formatter='TSV' header='1' uniqueRows='1' datasetConfigVersion='0.6'><Dataset name='hsapiens_gene_ensembl' interface='default'><Attribute name='ensembl_gene_id'/><Attribute name='external_gene_name'/><Attribute name='entrezgene_id'/><Attribute name='uniprotswissprot'/><Attribute name='refseq_mrna'/><Attribute name='description'/></Dataset></Query>",
         "name": "biomart_gene_mapping.txt",
         "about": "BioMart gene mappings for human genes including Ensembl IDs, gene symbols (HGNC), Entrez Gene IDs, UniProt IDs, and RefSeq accessions. Downloaded from Ensembl BioMart API. See https://www.ensembl.org/biomart"
+    },
+    "collectri":{
+      "url":"https://github.com/saezlab/CollecTRI",
+      "name":"human_CollecTRI.csv",
+      "about":"Signed transcription factor (TF) - target gene interactions"
     }
 }

@@ -8,6 +8,7 @@ import shutil
 import pandas as pd
 from pathlib import Path
 from coregtor.config import DATA_SOURCES
+import decoupler as dc
 
 def convert_genes(input: list[str], 
                  input_type: str = "symbol", 
@@ -33,9 +34,6 @@ def convert_genes(input: list[str],
         dict: Mapping of input identifiers to output identifiers
               Returns None for identifiers that couldn't be mapped
     
-    Example:
-        >>> convert_genes(['TP53', 'BRCA1'], 'symbol', 'entrez_id')
-        {'TP53': '7157', 'BRCA1': '672'}
     """
     # Load data if not provided
     if data is None:
@@ -58,7 +56,6 @@ def convert_genes(input: list[str],
             results[gene_id] = None
     
     return results
-
 
 
 def download(url, file):
@@ -442,3 +439,76 @@ def string_get_edges(
     result_cols.append('edge_source')
     
     return edges[result_cols]
+
+
+def get_CollecTRI(location):
+    """
+    Download and load CollecTRI transcription factor regulatory network.
+        
+    Args:
+        location: Directory where CollecTRI data should be stored
+    
+    Returns:
+        pandas DataFrame 
+    """
+    filename = DATA_SOURCES["collectri"]["name"]  # Assumes this is in your config
+    destination = os.path.join(location, filename)
+    file_path = Path(destination)
+    
+    # Check if file exists locally
+    if file_path.exists():
+        print(f"Loading CollecTRI network from {file_path}...")
+        edges = pd.read_csv(file_path, sep='\t')
+        print(f"Loaded {len(edges)} regulatory interactions")
+        return edges
+    
+    # File doesn't exist, download from decoupler
+    print(f"Loading CollecTRI network from decoupler...")
+    edges = dc.op.collectri(organism='human') #dc.get_collectri(organism='human', split_complexes=False)
+    
+    # Create parent directories if needed
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Save to local file
+    print(f"Saving CollecTRI data to {file_path}...")
+    edges.to_csv(file_path, sep='\t', index=False)
+    
+    print(f"Loaded {len(edges)} regulatory interactions")
+    return edges
+
+
+
+def get_CollecTRI_edges_to(
+    sources: list[str],
+    target: str,
+    db: pd.DataFrame = None,
+    location: str = None
+) -> pd.DataFrame:
+    """
+    Get CollecTRI edges from sources to target gene.
+    
+    Args:
+        sources: List of source gene symbols (TFs) (e.g., ['TP53', 'BRCA1'])
+        target: Target gene symbol (e.g., 'MDM2')
+        db: Pre-loaded CollecTRI DataFrame (if None, will load from decoupler)
+        location: Directory where CollecTRI data is stored (required if db is None)
+    
+    Returns:
+        DataFrame with columns: source, target, mor, reference, edge_source
+    """
+    if db is None:
+        if location is None:
+            raise ValueError("Either db or location must be provided")
+        db = get_CollecTRI(location)
+    
+    sources_set = set(sources)
+    
+    # Filter edges where source is in sources list AND target matches
+    mask = (db['source'].isin(sources_set)) & (db['target'] == target)
+    edges = db[mask].copy()
+    
+    edges['edge_source'] = 'collectri'
+    
+    e = edges[['source', 'target', 'weight', 'resources', 'references','sign_decision']]
+    e = e.rename(columns={"source":"node1","target":"node2"})
+    return e
