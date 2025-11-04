@@ -95,7 +95,7 @@ def _identify_coregulators_hierarchical(
     labels = model.fit_predict(dist_matrix.values)
 
     gene_clusters = pd.DataFrame({
-        'gene': dist_matrix.index,
+        'gene': dist_matrix.index.astype(str),
         'cluster_id': labels
     })
 

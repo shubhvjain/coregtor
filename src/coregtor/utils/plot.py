@@ -13,6 +13,8 @@ import networkx as nx
 import hashlib
 from matplotlib.lines import Line2D
 from matplotlib.patches import Circle, Polygon
+import matplotlib.pyplot as plt
+import networkx as nx
 #------------------
 # Visualize modules
 #------------------
@@ -299,4 +301,83 @@ def cluster_target_edges(cluster_nodes: list, target_n: str, edges: pd.DataFrame
     ax.legend(handles=legend_elements, loc='best', fontsize=9, framealpha=0.9)
     plt.axis('off')
     plt.tight_layout()
+    plt.show()
+
+def visualize_network(G, title="Cluster", figsize=(6,4), layout='spring', node_color=None):
+    """
+    Visualize NetworkX graph with nodes colored by cluster_id.
+    
+    Args:
+        G: NetworkX graph
+        title: Plot title
+        figsize: Figure size
+        layout: Layout algorithm ('spring', 'kamada_kawai', 'circular')
+        node_color: Dict mapping hex colors to lists of nodes. Example: {"#ff0000": [node1, node2], "#00ff00": [node3]}
+    """
+    if G.number_of_nodes() == 0:
+        print("Graph has no nodes")
+        return
+    
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Choose layout
+    if layout == 'spring':
+        pos = nx.spring_layout(G, k=0.5, iterations=50, seed=42)
+    elif layout == 'kamada_kawai':
+        pos = nx.kamada_kawai_layout(G)
+    elif layout == 'circular':
+        pos = nx.circular_layout(G)
+    else:
+        pos = nx.spring_layout(G, k=0.5, iterations=50, seed=42)
+    
+    # Get cluster_id for each node and assign colors
+    node_colors = {}
+    default_colors = plt.cm.tab20
+    
+    for node in G.nodes():
+        cluster_id = G.nodes[node].get('cluster_id', 0)
+        # Use hash for consistent color per cluster
+        color_idx = hash(str(cluster_id)) % 20
+        node_colors[node] = default_colors(color_idx)
+    
+    # Override colors with custom node_color mappings if provided
+    if node_color:
+        for hex_color, nodes in node_color.items():
+            for node in nodes:
+                if node in node_colors:
+                    node_colors[node] = hex_color
+                else:
+                    print(f"Warning: Node {node} not found in graph")
+    
+    # Convert node_colors dict to list in node order
+    node_color_list = [node_colors[node] for node in G.nodes()]
+    
+    # Draw edges
+    nx.draw_networkx_edges(
+        G, pos,
+        edge_color='black',
+        alpha=0.3,
+        arrows=False,
+        arrowsize=10,
+        width=2,
+        ax=ax
+    )
+    
+    # Draw nodes
+    nx.draw_networkx_nodes(
+        G, pos,
+        node_color=node_color_list,
+        node_size=300,
+        alpha=0.9,
+        ax=ax
+    )
+    
+    # Draw labels for small graphs
+    if G.number_of_nodes() <= 50:
+        nx.draw_networkx_labels(G, pos, font_size=8, ax=ax)
+    
+    ax.set_title(title, fontsize=15)
+    ax.axis('off')
+    plt.tight_layout()
+    
     plt.show()
