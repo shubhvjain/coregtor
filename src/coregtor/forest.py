@@ -19,7 +19,7 @@ from pathlib import Path
 # Type aliases for better readability
 PathLike = Union[str, Path]
 
-def create_model_input(raw_ge_data: pd.DataFrame,target_gene:str,t_factors:pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def create_model_input(raw_ge_data: pd.DataFrame,target_gene:str,t_factors: pd.DataFrame = None) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Prepare gene expression data for training.
 
@@ -45,12 +45,19 @@ def create_model_input(raw_ge_data: pd.DataFrame,target_gene:str,t_factors:pd.Da
     # Extract the target vector Y
     Y = raw_ge_data[[target_gene]]
 
-    # Get the list of TFs to keep
-    tf_list = t_factors['gene_name'].tolist()
+    # Get feature columns
+    if t_factors is not None and not t_factors.empty:
+        tf_list = t_factors['gene_name'].tolist()
+        X_cols = [gene for gene in tf_list if gene in raw_ge_data.columns and gene != target_gene]
+    else:
+        # Use all columns except target if no t_factors provided
+        X_cols = [col for col in raw_ge_data.columns if col != target_gene]
+    
+    if not X_cols:
+        raise ValueError("No valid feature columns found after filtering.")
 
-    # Filter only TF columns present in raw_ge_data, excluding the target gene
-    X_cols = [gene for gene in tf_list if gene in raw_ge_data.columns and gene != target_gene]
     X = raw_ge_data[X_cols]
+    return X, Y
 
     return X, Y
 
@@ -87,15 +94,12 @@ def tree_paths(model,X,Y) -> pd.DataFrame:
     """
     Extract all root-to-leaf decision paths from a trained ensemble model.
     
-    This is the main entry point for path extraction. It processes a trained
-    ensemble model to extract all unique decision paths.
+    This is the main entry point for path extraction. It processes a trained ensemble model to extract all unique decision paths.
     
     Args:
       model : sklearn ensemble model
-      ge_data (pd.DataFrame) : Gene expression data used to train the model. This is required to extract gene names.
       X (pd.DataFrame) : Input of the model. This is required to get gene names 
       Y (pd.DataFrame) : Training output of the model. This is required to get gene name  of the target 
-
     
     Returns:
       pd.DataFrame :  DataFrame containing all decision tree paths with columns:
@@ -103,7 +107,7 @@ def tree_paths(model,X,Y) -> pd.DataFrame:
         - source: First gene in the decision path (root decision)
         - target: Target gene being predicted (constant across all rows)
         - path_length: Number of decision nodes in the path
-        - node1, node2, ...: Genes used at each decision level
+        - node1, node2, ...: Genes used at each decision level (excluding source)
         - Unused node columns are filled with None
     
     """    
@@ -121,7 +125,6 @@ def extract_paths_from_tree(tree, feature_names: List[str], target_col: str) -> 
     decisions that lead to a prediction.
     
     Args:
-    
     tree (sklearn.tree._tree.Tree) :  The tree structure from a trained decision tree estimator.
     feature_names (List[str]) : List of feature (gene) names corresponding to tree feature indices.
     target_col (str) :  Name of the target gene/column being predicted.
@@ -204,14 +207,10 @@ def extract_paths_from_forest(ensemble_model, feature_names: List[str], target_c
     and consolidates them into a structured DataFrame suitable for analysis.
     The resulting format enables easy statistical analysis and visualization.
     
-    Parameters:
-    -----------
-    ensemble_model : sklearn ensemble model
-        Trained Random Forest or Extra Trees model containing multiple estimators.
-    feature_names : List[str]
-        List of feature (gene) names used in the model.
-    target_col : str, default="target"
-        Name of the target column/gene being predicted.
+    Args:
+    ensemble_model : sklearn ensemble model Trained Random Forest or Extra Trees model containing multiple estimators.
+    feature_names  (List[str]) : List of feature (gene) names used in the model.
+    target_col (str): default="target",  Name of the target column/gene being predicted.
     
     Returns:
     --------

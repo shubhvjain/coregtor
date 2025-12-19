@@ -80,30 +80,6 @@ def _identify_coregulators_hierarchical(
 
     dist_matrix = _ensure_distance_matrix(comparison_matrix)
 
-    if len(dist_matrix) <= 1:
-        gene_clusters = pd.DataFrame({
-            'gene': dist_matrix.index.astype(str),
-            'cluster_id': 0
-        })
-        
-        modules_df = pd.DataFrame({
-            'target_gene': [target_gene],
-            'gene_cluster': [','.join(gene_clusters['gene'])],
-            'n_genes': [len(gene_clusters)],
-            'cluster_id': [0]
-        })
-        
-        # Store metadata
-        modules_df.attrs['method'] = 'hierarchical'
-        modules_df.attrs['linkage'] = linkage
-        modules_df.attrs['n_modules'] = 1
-        modules_df.attrs['target_gene'] = target_gene
-        modules_df.attrs['single_gene'] = True
-        
-        # Return dummy model for API consistency
-        model = AgglomerativeClustering(n_clusters=1, metric="precomputed")
-        return modules_df, model
-
     clustering_params = {
         "metric": "precomputed",
         "linkage": linkage
