@@ -1,0 +1,38 @@
+{
+  "target_gene": [],
+  "create_model": {
+    "model": "rf",
+    "model_options": {
+      "max_depth": 5,
+      "n_estimators": 1000,
+      "n_jobs":5
+    }
+  },
+  "tree_paths": {},
+  "create_context": {
+    "method": "tree_paths"
+  },
+  "transform_context": [
+    {
+      "id": "default",
+      "method": "gene_frequency",
+      "normalize": false,
+      "min_frequency": 1
+    }
+  ],
+  "compare_context": [
+    {
+      "id": "default",
+      "method": "cosine",
+      "transformation_id": "default",
+      "convert_to_distance": false
+    }
+  ],
+  "output_dir": "...",
+  "checkpointing": true,
+  "force_fresh": false,
+  "input": {
+    "expression": "...",
+    "tflist": "..."
+  }
+}
