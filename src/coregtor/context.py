@@ -3,6 +3,7 @@ import re
 from typing import Union, Dict, Any,Dict,Callable,List
 from collections import Counter
 from sklearn.metrics.pairwise import cosine_similarity
+from coregtor.utils.error import CoRegTorError
 
 #----------------
 # Create context
@@ -19,7 +20,7 @@ def _create_context_set_tree_paths(tree_paths: pd.DataFrame, **kwargs) -> dict:
         dict: {source_gene: [list of sub-paths excluding root and leaf]}
     """
     if "source" not in tree_paths.columns:
-        raise ValueError("DataFrame must contain a 'source' column.")
+        raise  CoRegTorError("DataFrame must contain a 'source' column.")
 
     # Identify and sort node columns (node1, node2, ...)
     node_cols = []
@@ -28,7 +29,7 @@ def _create_context_set_tree_paths(tree_paths: pd.DataFrame, **kwargs) -> dict:
         if m:
             node_cols.append((int(m.group(1)), c))
     if not node_cols:
-        raise ValueError("No 'node*' columns found.")
+        raise  CoRegTorError("No 'node*' columns found.")
     node_cols = [c for _, c in sorted(node_cols, key=lambda t: t[0])]
 
     def extract_subpaths(group):
@@ -69,30 +70,8 @@ def _create_context_set_tree_paths(tree_paths: pd.DataFrame, **kwargs) -> dict:
     return result
 
 
-def _create_context_set_tree(tree_data: Any, **kwargs) -> dict:
-    """
-    Generate context sets from tree structure.
-    
-    Args:
-        tree_data: TODO - describe input format
-        **kwargs: TODO - describe additional parameters
-        
-    Returns:
-        dict: {source_gene: [list of subpaths]}
-    """
-    # TODO: Implement tree-based pathway set generation
-    # TODO: Define expected input format for tree_data
-    # TODO: Extract pathways from tree structure
-    # TODO: Apply pathway extraction logic
-    # TODO: Return formatted pathway sets
-    
-    raise NotImplementedError("Method 'tree' is not yet implemented")
-
-
-# Dispatcher dictionary
 CONTEXT_SET_METHODS: Dict[str, callable] = {
-    "tree_paths": _create_context_set_tree_paths,
-    "tree": _create_context_set_tree,
+    "tree_paths": _create_context_set_tree_paths
 }
 
 def create_context(
@@ -114,13 +93,10 @@ def create_context(
         dict: {source_gene: [list of subpaths]}
     
     Raises:
-        ValueError: If method is unknown
+        CoRegTorError: If method is unknown
     """
     if method not in CONTEXT_SET_METHODS:
-        raise ValueError(
-            f"Unknown method: {method}. "
-            f"Choose from {list(CONTEXT_SET_METHODS.keys())}"
-        )
+        raise  CoRegTorError(f"Unknown method: {method}. Choose from {list(CONTEXT_SET_METHODS.keys())} ")
     
     generator = CONTEXT_SET_METHODS[method]
     return generator(data, **kwargs)
@@ -183,7 +159,6 @@ def _transform_to_gene_frequency(context_set: dict, **kwargs) -> pd.DataFrame:
     return df
 
 
-# Dispatcher dictionary
 CONTEXT_TRANSFORMS: Dict[str, Callable] = {
     "gene_frequency": _transform_to_gene_frequency,
 }
@@ -207,12 +182,11 @@ def transform_context(
         pd.DataFrame: Transformed representation (format depends on method)
     
     Raises:
-        ValueError: If method is unknown
+        CoRegTorError: If method is unknown
     """
     if method not in CONTEXT_TRANSFORMS:
-        raise ValueError(
-            f"Unknown method: {method}. "
-            f"Choose from {list(CONTEXT_TRANSFORMS.keys())}"
+        raise  CoRegTorError(
+            f"Unknown method: {method}. Choose from {list(CONTEXT_TRANSFORMS.keys())} "
         )
     
     transformer = CONTEXT_TRANSFORMS[method]
@@ -318,7 +292,7 @@ def compare_context(
     Args:
         transformed_data: Output from transform_context() - DataFrame with sources as rows
         method: Similarity/distance metric name (e.g., 'cosine')
-        transformation_type: Type of transformation used (for validation).If None, attempts to read from DataFrame metadata.
+        transformation_type: Type of transformation used .If None, attempts to read from DataFrame metadata.
         **kwargs: Metric-specific parameters
             - convert_to_distance (bool): Convert similarity to distance (1 - similarity)
     
@@ -326,7 +300,7 @@ def compare_context(
         pd.DataFrame: Symmetric pairwise similarity/distance matrix (sources x sources)
     
     Raises:
-        ValueError: If method is unknown or incompatible with transformation type
+        CoRegTorError: If method is unknown or incompatible with transformation type
     
     """
     # Auto-detect transformation type from metadata if not provided
@@ -336,9 +310,8 @@ def compare_context(
     # Validate compatibility
     if not _is_compatible(transformation_type, method):
         compatible = list_compatible_methods(transformation_type)
-        raise ValueError(
-            f"Method '{method}' is not compatible with transformation type "
-            f"'{transformation_type}'. Compatible methods: {compatible}"
+        raise  CoRegTorError(
+            f"Method '{method}' is not compatible with transformation type {transformation_type}.  Compatible methods: {compatible} "
         )
     
     # Get the comparison function
@@ -347,9 +320,8 @@ def compare_context(
     elif method in COMPARISON_METHODS.get("universal", {}):
         comparator = COMPARISON_METHODS["universal"][method]
     else:
-        raise ValueError(
-            f"Unknown comparison method: {method}. "
-            f"Available methods: {list_compatible_methods(transformation_type)}"
+        raise CoRegTorError(
+            f"Unknown comparison method: {method}. Available methods: {list_compatible_methods(transformation_type)}"
         )
     
     # Execute comparison

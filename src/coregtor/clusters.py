@@ -12,7 +12,6 @@ from scipy.spatial.distance import squareform
 from sklearn.cluster import AgglomerativeClustering
 from typing import Tuple, List, Optional, Dict, Callable
 
-
 # ------------------
 # Helper Functions
 # ------------------
