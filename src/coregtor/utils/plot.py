@@ -8,13 +8,17 @@ import matplotlib.pyplot as plt
 from scipy.cluster.hierarchy import linkage, dendrogram as scipy_dendrogram, cophenet
 from scipy.spatial.distance import squareform
 from sklearn.linear_model import QuantileRegressor
-from typing import Tuple, List, Optional, Dict
+from typing import Tuple, List, Optional, Dict,Any
 import networkx as nx
 import hashlib
 from matplotlib.lines import Line2D
 from matplotlib.patches import Circle, Polygon
 import matplotlib.pyplot as plt
 import networkx as nx
+import seaborn as sns
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
 #------------------
 # Visualize modules
 #------------------
@@ -381,3 +385,412 @@ def visualize_network(G, title="Cluster", figsize=(6,4), layout='spring', node_c
     plt.tight_layout()
     
     plt.show()
+
+def gene_expression_heatmap(df, gene_list, 
+                                 show_sample_labels=True,
+                                 label_threshold=25,
+                                 figsize=None,
+                                 cmap='RdBu_r',
+                                 center=0,
+                                 title='Gene Expression Heatmap',
+                                 standardize=False):
+    """
+    Plots a heatmap of gene expression values for selected genes.
+
+    Given a gene expression DataFrame and a list of genes, this function displays a heatmap of expression values for those genes across all samples. It automatically suppresses y-axis (sample) labels if the gene list is large, to keep the visualization clear.
+
+    Args:
+        df (pandas.DataFrame): Gene expression matrix (rows are samples, columns are genes).
+        gene_list (list): List of gene names to include on the heatmap. Must contain at least one gene.
+        show_sample_labels (bool, optional): Whether to display sample (y-axis) labels. Defaults to True.
+        label_threshold (int, optional): Hide sample labels if the gene list length exceeds this value. Defaults to 50.
+        figsize (tuple, optional): Figure size in inches (width, height). Defaults to an automatic value based on gene/sample count.
+        cmap (str, optional): Colormap for the heatmap. Defaults to 'RdBu_r'.
+        center (float, optional): Value at which to center the colormap. Defaults to 0.
+        title (str, optional): Title for the plot. Defaults to 'Gene Expression Heatmap'.
+        standardize (bool, optional): If True, standardizes expression values (z-score per gene). Defaults to False.
+
+    Returns:
+        tuple: (fig, ax) matplotlib figure and axes objects of the generated plot.
+
+    Raises:
+        ValueError: If gene_list is empty or none of the genes are found in the DataFrame.
+
+    """
+    
+    # Validate input
+    if not gene_list or len(gene_list) < 1:
+        raise ValueError("gene_list must contain at least 1 gene")
+    
+    # Check if all genes exist in dataframe
+    missing_genes = [g for g in gene_list if g not in df.columns]
+    if missing_genes:
+        print(f"Warning: The following genes are not in the dataframe: {missing_genes}")
+        gene_list = [g for g in gene_list if g in df.columns]
+        if len(gene_list) == 0:
+            raise ValueError("None of the specified genes exist in the dataframe")
+    
+    # Subset the data
+    data = df[gene_list].copy()
+    
+    # Standardize if requested
+    if standardize:
+        from sklearn.preprocessing import StandardScaler
+        scaler = StandardScaler()
+        data = pd.DataFrame(
+            scaler.fit_transform(data),
+            columns=data.columns,
+            index=data.index
+        )
+    
+    # Auto-calculate figure size if not provided
+    if figsize is None:
+        width = max(10, len(gene_list) * 0.3)
+        height = max(8, len(data) * 0.1)
+        figsize = (min(width, 20), min(height, 15))
+    
+    # Determine whether to show row (sample) labels
+    show_yticklabels = show_sample_labels and len(gene_list) <= label_threshold
+    
+    # Create the heatmap
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    sns.heatmap(
+        data,
+        cmap=cmap,
+        center=center,
+        xticklabels=True,  # Always show gene names
+        yticklabels=show_yticklabels,  # Conditionally show sample labels
+        cbar_kws={'label': 'Expression Level'},
+        ax=ax
+    )
+    
+    # Rotate x-axis labels for better readability
+    plt.xticks(rotation=90)
+    if show_yticklabels:
+        plt.yticks(rotation=0)
+    
+    plt.title(title)
+    plt.xlabel('Genes')
+    plt.ylabel('Samples')
+    plt.tight_layout()
+    
+    return fig, ax
+
+
+def gene_cluster(pca_df, x_col, y_col, z_col=None, cluster_col=None, 
+                   figsize=(10, 8), title='Gene Expression PCA', 
+                   alpha=0.6, s=50):
+    """Plot gene expression PCA data in 2D or 3D with optional cluster coloring.
+    
+    Creates a scatter plot of genes in reduced dimensional space. Points can be 
+    colored uniformly or by cluster membership. Supports both 2D and 3D visualization.
+    
+    Args:
+        pca_df (pd.DataFrame): DataFrame containing gene data with principal 
+            components and optional cluster assignments. Should have columns 
+            matching x_col, y_col, and optionally z_col and cluster_col.
+        x_col (str): Column name for x-axis values (e.g., 'pc1').
+        y_col (str): Column name for y-axis values (e.g., 'pc2').
+        z_col (str, optional): Column name for z-axis values (e.g., 'pc3'). 
+            If provided, creates a 3D plot. Defaults to None for 2D plot.
+        cluster_col (str, optional): Column name for cluster assignments. If None, 
+            all points will be plotted in the same color. Defaults to None.
+        figsize (tuple, optional): Figure size as (width, height). Defaults to (10, 8).
+        title (str, optional): Plot title. Defaults to 'Gene Expression PCA'.
+        alpha (float, optional): Point transparency (0-1). Defaults to 0.6.
+        s (int, optional): Point size. Defaults to 50.
+    
+    Returns:
+        tuple: (fig, ax) matplotlib figure and axes objects.
+    
+    Example:
+        >>> pca_result = compute_gene_pca(expr_data, n_components=3)
+        >>> 
+        >>> # 2D plot without clustering
+        >>> fig, ax = plot_gene_data(pca_result, 'pc1', 'pc2')
+        >>> plt.show()
+        >>> 
+        >>> # 3D plot without clustering
+        >>> fig, ax = plot_gene_data(pca_result, 'pc1', 'pc2', z_col='pc3')
+        >>> plt.show()
+        >>> 
+        >>> # 3D plot with cluster coloring
+        >>> pca_result['cluster'] = kmeans.fit_predict(pca_result[['pc1', 'pc2', 'pc3']])
+        >>> fig, ax = plot_gene_data(pca_result, 'pc1', 'pc2', z_col='pc3', 
+        ...                          cluster_col='cluster')
+        >>> plt.show()
+    """
+    # Determine if 3D plot is needed
+    is_3d = z_col is not None
+    
+    # Create figure and axes
+    fig = plt.figure(figsize=figsize)
+    if is_3d:
+        ax = fig.add_subplot(111, projection='3d')
+    else:
+        ax = fig.add_subplot(111)
+    
+    if cluster_col is None:
+        # Plot all points in same color
+        if is_3d:
+            ax.scatter(pca_df[x_col], pca_df[y_col], pca_df[z_col],
+                      alpha=alpha, s=s, c='steelblue', edgecolors='k', linewidth=0.5)
+        else:
+            ax.scatter(pca_df[x_col], pca_df[y_col], 
+                      alpha=alpha, s=s, c='steelblue', edgecolors='k', linewidth=0.5)
+    else:
+        # Plot points colored by cluster
+        unique_clusters = pca_df[cluster_col].unique()
+        n_clusters = len(unique_clusters)
+        
+        # Use colormap for clusters
+        cmap = plt.cm.get_cmap('tab10', n_clusters)
+        
+        for i, cluster in enumerate(sorted(unique_clusters)):
+            cluster_mask = pca_df[cluster_col] == cluster
+            
+            if is_3d:
+                ax.scatter(pca_df.loc[cluster_mask, x_col], 
+                          pca_df.loc[cluster_mask, y_col],
+                          pca_df.loc[cluster_mask, z_col],
+                          alpha=alpha, s=s, c=[cmap(i)], 
+                          label=f'Cluster {cluster}',
+                          edgecolors='k', linewidth=0.5)
+            else:
+                ax.scatter(pca_df.loc[cluster_mask, x_col], 
+                          pca_df.loc[cluster_mask, y_col],
+                          alpha=alpha, s=s, c=[cmap(i)], 
+                          label=f'Cluster {cluster}',
+                          edgecolors='k', linewidth=0.5)
+        
+        ax.legend(loc='best', frameon=True, fancybox=True)
+    
+    # Set labels
+    ax.set_xlabel(x_col.upper(), fontsize=12)
+    ax.set_ylabel(y_col.upper(), fontsize=12)
+    if is_3d:
+        ax.set_zlabel(z_col.upper(), fontsize=12)
+    
+    ax.set_title(title, fontsize=14, fontweight='bold')
+    
+    # Add grid (2D only, 3D has default grid)
+    if not is_3d:
+        ax.grid(True, alpha=0.3, linestyle='--')
+    
+    plt.tight_layout()
+    
+    return fig, ax
+
+
+
+def similarity_matrix_2d_embedding(similarity_matrix: np.ndarray, 
+                                       config: Dict[str, Any] = None, 
+                                       target_names: List[str] = None) -> plt.Figure:
+    """
+    Creates 2D embedding (MDS) of a single similarity matrix to visualize target clustering.
+    
+    Args:
+        similarity_matrix: np.ndarray (n_targets, n_targets) similarity/distance matrix
+        config: Plotting options (colors, size, method)
+        target_names: Optional list of target names for labels
+    
+    Returns:
+        matplotlib Figure with 2D scatter plot
+    """
+    import matplotlib.pyplot as plt
+    from sklearn.manifold import MDS
+    import numpy as np
+    
+    # Validate input
+    if similarity_matrix.ndim != 2 or similarity_matrix.shape[0] != similarity_matrix.shape[1]:
+        raise ValueError("Expected square similarity matrix")
+    
+    # Default config
+    plot_config = config or {}
+    method = plot_config.get("method", "mds")
+    n_components = plot_config.get("n_components", 2)
+    
+    # Convert to distance matrix (smaller = more similar)
+    distance_matrix = 1 - similarity_matrix  # Assumes similarity in [0,1]
+    
+    # Create 2D embedding
+    if method == "mds":
+        embedding = MDS(n_components=n_components, dissimilarity="precomputed", 
+                       random_state=42, max_iter=300)
+        coords = embedding.fit_transform(distance_matrix)
+    else:
+        raise ValueError(f"Method {method} not supported. Use 'mds'")
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(12, 10))
+    
+    # Main scatter plot
+    scatter = ax.scatter(coords[:, 0], coords[:, 1], 
+                        c=similarity_matrix.max(axis=1),  # Color by avg similarity to others
+                        s=plot_config.get("point_size", 200),
+                        cmap='viridis', alpha=0.8, edgecolors='black', linewidth=0.5)
+    
+    # Colorbar
+    cbar = plt.colorbar(scatter, ax=ax, shrink=0.8)
+    cbar.set_label("Average Similarity to Other Targets", fontsize=12)
+    
+    # Labels (target names or indices)
+    if target_names:
+        for i, name in enumerate(target_names[:20]):  # Limit for readability
+            ax.annotate(name[:8], (coords[i, 0], coords[i, 1]), 
+                       xytext=(5, 5), textcoords='offset points', fontsize=9)
+    else:
+        for i in range(min(20, len(coords))):
+            ax.annotate(str(i), (coords[i, 0], coords[i, 1]), 
+                       xytext=(5, 5), textcoords='offset points', fontsize=9)
+    
+    # Styling
+    ax.set_xlabel("MDS Dimension 1", fontsize=12)
+    ax.set_ylabel("MDS Dimension 2", fontsize=12)
+    ax.set_title("Target Similarity 2D Embedding\n(Closer points = more similar contexts)", 
+                fontsize=14, fontweight='bold')
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    return fig
+
+def add_caption(fig: plt.Figure, target: str, created_on: str = None) -> plt.Figure:
+    """
+    Adds standardized caption to bottom of figure with extra spacing.
+    """
+    import matplotlib.pyplot as plt
+    from datetime import datetime
+    import pytz
+    
+    # Auto-generate timestamp if not provided
+    if created_on is None:
+        tz = pytz.timezone('Europe/Berlin')  # CET/CEST
+        created_on = datetime.now(tz).strftime("%Y-%m-%d %H:%M CET")
+    
+    caption = f"Results for target {target}. Created on: {created_on}"
+    
+    # Add caption with EXTRA BOTTOM SPACING (0.01 → 0.005)
+    fig.text(0.5, 0.005, caption, 
+             ha='center', va='bottom', fontsize=10, 
+             style='italic', color='gray', alpha=0.8,
+             wrap=True, transform=fig.transFigure)
+    
+    # Ensure white background
+    fig.patch.set_facecolor('white')
+    
+    return fig
+
+def similarity_matrix_heatmap(similarity_matrix: np.ndarray, 
+                                  config: Dict[str, Any] = None, 
+                                  target_names: List[str] = None) -> plt.Figure:
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    import numpy as np
+    
+    plot_config = config or {}
+    percentile = plot_config.get("percentile", 75)  # NEW: Configurable percentile
+    n = similarity_matrix.shape[0]
+    
+    # Convert to numpy if pandas
+    if hasattr(similarity_matrix, 'values'):
+        matrix_data = similarity_matrix.values
+        if target_names is None and hasattr(similarity_matrix, 'index'):
+            target_names = similarity_matrix.index.tolist()
+    else:
+        matrix_data = similarity_matrix
+    
+    # NEW: 75th percentile selection by average similarity
+    avg_sim = matrix_data.mean(axis=1)
+    threshold = np.percentile(avg_sim, percentile)
+    high_sim_indices = np.where(avg_sim >= threshold)[0]
+    
+    matrix_subset = matrix_data[high_sim_indices][:, high_sim_indices]
+    labels_subset = [target_names[i] for i in high_sim_indices] if target_names else high_sim_indices
+    n_subset = len(labels_subset)
+    
+    title_suffix = f"(Top {percentile}th percentile similarity, n={n_subset}/{n})"
+    
+    # Create figure
+    figsize = (max(8, min(15, n_subset/6)), max(8, min(15, n_subset/6)))
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Heatmap
+    mask = np.triu(np.ones_like(matrix_subset, dtype=bool))
+    sns.heatmap(matrix_subset, mask=mask, ax=ax, cmap='viridis', 
+                cbar_kws={'label': 'Similarity', 'shrink': 0.8},
+                square=True, linewidths=0)
+    
+    # Labels with dynamic font size
+    if labels_subset and len(labels_subset) > 0:
+        short_labels = [str(l)[:8] for l in labels_subset]  # Slightly longer labels
+        label_fontsize = 7 if n_subset > 25 else 8
+        
+        ax.set_xticks(np.arange(n_subset))
+        ax.set_xticklabels(short_labels, rotation=45, ha='right', fontsize=label_fontsize)
+        ax.set_yticks(np.arange(n_subset))
+        ax.set_yticklabels(short_labels, rotation=0, fontsize=label_fontsize)
+    
+    ax.set_title(f"Similarity Matrix Heatmap {title_suffix}", 
+                fontsize=14, fontweight='bold', pad=20)
+    ax.set_xlabel("Targets (High Similarity)", fontsize=12)
+    ax.set_ylabel("Targets (High Similarity)", fontsize=12)
+    
+    plt.tight_layout()
+    return fig
+
+
+def dendrogram1(similarity_matrix: np.ndarray, 
+                   config: Dict[str, Any] = None, 
+                   target_names: List[str] = None) -> plt.Figure:
+    """
+    Creates hierarchical clustering dendrogram from similarity matrix.
+    """
+    import matplotlib.pyplot as plt
+    from scipy.cluster.hierarchy import dendrogram, linkage
+    import numpy as np
+    import pandas as pd
+    
+    plot_config = config or {}
+    method = plot_config.get('method', 'average')
+    figsize = plot_config.get('figsize', (15, 9))
+    leaf_rotation = plot_config.get('leaf_rotation', 90)
+    leaf_font_size = plot_config.get('leaf_font_size', 8)
+    color_threshold = plot_config.get('color_threshold')
+    
+    # Handle pandas DataFrame
+    if hasattr(similarity_matrix, 'values'):
+        matrix_data = similarity_matrix.values
+        if target_names is None and hasattr(similarity_matrix, 'index'):
+            target_names = similarity_matrix.index.tolist()
+    else:
+        matrix_data = similarity_matrix
+    
+    # Convert to distance matrix
+    dist_matrix = 1 - matrix_data
+    
+    # Ensure symmetric condensed distance matrix for scipy
+    n = dist_matrix.shape[0]
+    condensed_dist = dist_matrix[np.triu_indices(n, k=1)]
+    
+    # Create linkage
+    Z = linkage(condensed_dist, method=method)
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Plot dendrogram
+    dendrogram(Z, ax=ax,
+               labels=target_names,
+               leaf_rotation=leaf_rotation,
+               leaf_font_size=leaf_font_size,
+               color_threshold=color_threshold,
+               above_threshold_color='gray')
+    
+    ax.set_title(f"Hierarchical Clustering Dendrogram ({method} linkage)", 
+                fontsize=14, fontweight='bold')
+    ax.set_ylabel("Distance", fontsize=12)
+    ax.set_xlabel("Genes", fontsize=12)
+    
+    plt.tight_layout()
+    return fig

@@ -34,5 +34,19 @@
   "input": {
     "expression": "...",
     "tflist": "..."
+  },
+  "clustering":[
+    {
+      "id":"default",
+      "matrix_id":"default",
+      "method":"hierarchical_clustering",
+      "method_options":{
+        "auto_threshold":"inconsistency"
+      }
+    }
+  ],
+  "result_generation":{
+      "n_jobs":2,
+      "rerun":false
   }
 }
