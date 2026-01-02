@@ -15,18 +15,21 @@ from sklearn.tree import _tree
 from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor
 from typing import List, Dict, Any,Union, Optional
 from pathlib import Path
+from coregtor.utils.error import CoRegTorError
 
 # Type aliases for better readability
 PathLike = Union[str, Path]
 
-def create_model_input(raw_ge_data: pd.DataFrame,target_gene:str,t_factors:pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def create_model_input(raw_ge_data: pd.DataFrame,target_gene:str,t_factors: pd.DataFrame = None) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Prepare gene expression data for training.
 
     This function splits the gene expression DataFrame into features (X) and target (Y) for supervised learning.
+
+    Additionally, if a list of t_factors is provided, X is filtered to include ony Transcription factors. 
     
     Args:
-      raw_ge_data (pd.DataFrame) : Gene expression data in samples x genes format 
+      raw_ge_data (pd.DataFrame) : Gene expression data in samples x genes format. NO processing done. 
       target_gene (str) :  Name of the target gene to predict. Must be present in raw_ge_data columns
       t_factors (pd.DataFrame) :  A DataFrame containing transcription factor gene names. It must have a column named 'gene_name' listing the TF genes. This DataFrame is used to filter the input gene expression data. 
       
@@ -36,32 +39,59 @@ def create_model_input(raw_ge_data: pd.DataFrame,target_gene:str,t_factors:pd.Da
     """
     # Check if raw_ge_data is empty
     if raw_ge_data.empty:
-        raise ValueError("The gene expression data (raw_ge_data) is empty.")
+        raise CoRegTorError("The gene expression data (raw_ge_data) is empty.","validation")
 
     # Check if target_gene is in raw_ge_data columns
     if target_gene not in raw_ge_data.columns:
-        raise ValueError(f"Target gene '{target_gene}' not found in gene expression data columns.")
-
+        raise CoRegTorError(f"Target gene '{target_gene}' not found in gene expression data columns.","validation")
+    
     # Extract the target vector Y
     Y = raw_ge_data[[target_gene]]
 
-    # Get the list of TFs to keep
-    tf_list = t_factors['gene_name'].tolist()
+    # Get feature columns
+    if t_factors is not None and not t_factors.empty:
+        tf_list = t_factors['gene_name'].tolist()
+        X_cols = [gene for gene in tf_list if gene in raw_ge_data.columns and gene != target_gene]
+    else:
+        # Use all columns except target if no t_factors provided
+        X_cols = [col for col in raw_ge_data.columns if col != target_gene]
+    
+    if not X_cols:
+        raise CoRegTorError("No valid feature columns found after filtering.","validation")
 
-    # Filter only TF columns present in raw_ge_data, excluding the target gene
-    X_cols = [gene for gene in tf_list if gene in raw_ge_data.columns and gene != target_gene]
     X = raw_ge_data[X_cols]
-
     return X, Y
+
+def _expression_pre_checks(X,Y, min_threshold=0.10):  
+    """
+    This method checks if the expression data satisfies certain thresholds to build a reasonable prediction model 
+    
+    Args:
+        X : Input
+        Y : Target
+        min_threshold : The minimum number of rows in the target dataset that should have a non zero values. 0.025 by default i.e. 2.5% of the total rows 
+
+    """
+    target = Y.iloc[:, 0]
+    non_zeros = (target != 0).sum()
+    total = len(target)
+    pct_nonzero = non_zeros / total
+    
+    min_required = int(total * min_threshold)
+    #print(min_required)
+    #print(min_threshold)
+    if non_zeros < min_required:
+        raise CoRegTorError(f"Only {non_zeros}/{total} ({pct_nonzero:.1%}) non-zeros. Need ≥{min_required}.","validation")
+        
 
 def create_model(X,Y,model="rf",model_options={"max_depth":5,"n_estimators":1000}):
     """
-    Train an ensemble regression model to predict the expression of a target gene  using transcription factors in the gene expression data as input features.
+    Train an ensemble regression model to predict the expression of the target gene Y using the expression values of other genes in the gene expression data X.
 
     Currently 2 ensemble model are supported : `sklearn.ensemble.RandomForestRegressor` and `sklearn.ensemble.ExtraTreesRegressor`
 
     Args:
-        X (pd.DataFrame) : Gene expression data (sample by genes) of transcription factors. This can be generated using the `create_model_input` method
+        X (pd.DataFrame) : Gene expression data (sample by genes). This can be generated using the :py:func:`create_model_input` method
         Y (pd.DataFrame) : Gene expression data for the target gene. This can be generated using the `create_model_input` method.
         model (str) : The type of ensemble based model. This must be a valid model in sklearn.ensemble module. Use `rf` (default) for random forest regressor,  `et` for extra trees regressor
         model_options (dict,optional) : Dictionary of key value pairs to specify training options. See the scikit-learn model docs for options: `RandomForestRegressor <https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestRegressor.html>`_ or  `ExtraTreesRegressor <https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.ExtraTreesRegressor.html>`_
@@ -70,12 +100,15 @@ def create_model(X,Y,model="rf",model_options={"max_depth":5,"n_estimators":1000
        Trained sklearn ensemble model
     """
 
+    # per check #1 if Y all Y values are 0, skip model 
+    _expression_pre_checks(X,Y)
+
     if model == "rf":
         ensemble = RandomForestRegressor(**model_options)
     elif model == "et":
         ensemble = ExtraTreesRegressor(**model_options)
     else:
-        raise ValueError(f"Invalid method '{model}'. Must be 'rf' or 'et'")
+        raise CoRegTorError(f"Invalid method '{model}'. Must be 'rf' or 'et'","validation") 
     
     # Train the model and measure time
     ensemble.fit(X, Y.values.ravel())
@@ -87,15 +120,12 @@ def tree_paths(model,X,Y) -> pd.DataFrame:
     """
     Extract all root-to-leaf decision paths from a trained ensemble model.
     
-    This is the main entry point for path extraction. It processes a trained
-    ensemble model to extract all unique decision paths.
+    This is the main entry point for path extraction. It processes a trained ensemble model to extract all unique decision paths.
     
     Args:
       model : sklearn ensemble model
-      ge_data (pd.DataFrame) : Gene expression data used to train the model. This is required to extract gene names.
       X (pd.DataFrame) : Input of the model. This is required to get gene names 
       Y (pd.DataFrame) : Training output of the model. This is required to get gene name  of the target 
-
     
     Returns:
       pd.DataFrame :  DataFrame containing all decision tree paths with columns:
@@ -103,7 +133,7 @@ def tree_paths(model,X,Y) -> pd.DataFrame:
         - source: First gene in the decision path (root decision)
         - target: Target gene being predicted (constant across all rows)
         - path_length: Number of decision nodes in the path
-        - node1, node2, ...: Genes used at each decision level
+        - node1, node2, ...: Genes used at each decision level (excluding source)
         - Unused node columns are filled with None
     
     """    
@@ -121,7 +151,6 @@ def extract_paths_from_tree(tree, feature_names: List[str], target_col: str) -> 
     decisions that lead to a prediction.
     
     Args:
-    
     tree (sklearn.tree._tree.Tree) :  The tree structure from a trained decision tree estimator.
     feature_names (List[str]) : List of feature (gene) names corresponding to tree feature indices.
     target_col (str) :  Name of the target gene/column being predicted.
@@ -204,14 +233,10 @@ def extract_paths_from_forest(ensemble_model, feature_names: List[str], target_c
     and consolidates them into a structured DataFrame suitable for analysis.
     The resulting format enables easy statistical analysis and visualization.
     
-    Parameters:
-    -----------
-    ensemble_model : sklearn ensemble model
-        Trained Random Forest or Extra Trees model containing multiple estimators.
-    feature_names : List[str]
-        List of feature (gene) names used in the model.
-    target_col : str, default="target"
-        Name of the target column/gene being predicted.
+    Args:
+    ensemble_model : sklearn ensemble model Trained Random Forest or Extra Trees model containing multiple estimators.
+    feature_names  (List[str]) : List of feature (gene) names used in the model.
+    target_col (str): default="target",  Name of the target column/gene being predicted.
     
     Returns:
     --------

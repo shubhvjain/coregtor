@@ -1,6 +1,6 @@
 [project]
 name = "coregtor"
-version = "0.1.5"
+version = "0.2.5"
 description = "A tool to predict transcription co-regulators for a gene from gene expression data using random forest methods"
 authors = [{name = "Shubh Vardhan Jain", email = "shubhvjain@gmail.com"}]
 license = "MIT"
@@ -10,7 +10,12 @@ dependencies = [
     "scikit-learn (>=1.7.2,<2.0.0)",
     "pandas (>=2.3.3,<3.0.0)",
     "matplotlib (>=3.10.7,<4.0.0)",
-    "numpy (>=2.3.4,<3.0.0)"
+    "numpy (>=2.3.4,<3.0.0)",
+    "networkx (>=3.5,<4.0)",
+    "decoupler (>=2.1.1,<3.0.0)",
+    "seaborn (>=0.13.2,<0.14.0)",
+    "psutil (>=7.1.3,<8.0.0)",
+    "joblib (>=1.5.3,<2.0.0)",
 ]
 
 
@@ -25,3 +30,5 @@ jupyter = "^1.1.1"
 sphinx-autodoc-typehints = "^3.5.1"
 sphinx-book-theme = "^1.1.4"
 
+[tool.poetry.scripts]
+"coregtor" = "coregtor.cli:main"  # The CLI!
