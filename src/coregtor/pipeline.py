@@ -666,7 +666,7 @@ class TargetResults:
                 continue 
             sim_matrix  = self.get_sim_matrix(res["matrix_id"])
             if sim_matrix is None:
-                print(f"Sim matrix with id: {res["id"]} not found")
+                print(f"Sim matrix with id: {res['id']} not found")
                 continue
             #print(sim_matrix)
 
