@@ -26,7 +26,7 @@ SCHEMA = {
     "type": "object",
     "required": [],
     "properties": {
-        "target_gene": {
+        "target_genes": {
             "type": "array",
             "items": {"type": "string"},
             "description": "List of target genes. [] = auto-discover TFs in data."
@@ -181,10 +181,14 @@ SCHEMA = {
 
 
 class Pipeline:
-    def __init__(self,expression_data:pd.DataFrame,tflist:pd.DataFrame,options: Dict[str, Any],exp_title: str = None):
+    def __init__(self,expression_data:pd.DataFrame,tflist:list,options: Dict[str, Any],exp_title: str = None):
         
         self.expression_data = expression_data
+        
+        if tflist is None or len(tflist)==0:
+            raise ValueError("TF list not provided")
         self.tflist = tflist
+        
         default_options = Pipeline._generate_default_config_dict()
         input_options = options
         options = {**default_options,**(input_options or {})}
@@ -203,7 +207,6 @@ class Pipeline:
             self.checkpoint_dir = Path(os.path.expanduser(os.path.expandvars(self.options.get("paths").get("temp")))) / self.title 
             self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
     
-
 
     ### manage pipeline checkpoints 
     def _get_pipeline_hash(self) -> str:
@@ -258,13 +261,13 @@ class Pipeline:
 
     
     def _auto_discover_targets(self) -> List[str]:
-        tfs = set( self.tflist["gene_name"].tolist())
+        tfs = set( self.tflist)
         genes_in_data = set(self.expression_data.columns)
         return sorted(list(tfs & genes_in_data))
     
     def _get_targets(self) -> List[str]:
-        targets = self.options.get("target_gene", [])
-        if not targets:
+        targets = self.options.get("target_genes", [])
+        if targets is None or len(targets)==0:
             return self._auto_discover_targets()
         return targets
     
@@ -443,13 +446,13 @@ class Pipeline:
             return type_defaults.get(node.get("type"), {})
         
         default_config = extract_schema_defaults(SCHEMA)
-        default_config["target_gene"] = []
+        default_config["target_genes"] = []
         
         return default_config
     
 
 class PipelineResults:
-    def __init__(self,options: Dict[str, Any],tflist:pd.DataFrame,exp_title: str = None):
+    def __init__(self,options: Dict[str, Any],tflist:list,exp_title: str = None):
     
         self.tflist = tflist
         default_options = Pipeline._generate_default_config_dict()
@@ -464,12 +467,13 @@ class PipelineResults:
             
         
     def _auto_discover_targets(self) -> List[str]:
-        tfs = set( self.tflist["gene_name"].tolist())
+        tfs = set(self.tflist)
         genes_in_data = set(self.expression_data.columns)
-        return sorted(list(tfs & genes_in_data))
+        all_non_tf_targets = genes_in_data - tfs
+        return sorted(list(all_non_tf_targets))
     
     def _get_targets(self) -> List[str]:
-        targets = self.options.get("target_gene", [])
+        targets = self.options.get("target_genes", [])
         if not targets:
             return self._auto_discover_targets()
         return targets
@@ -656,7 +660,7 @@ class TargetResults:
         """
         for res in self.options["clustering"]:
             print(res)
-            file_path = self.checkpoint_dir/ f"{self.target}_res_{res["id"]}.json"
+            file_path = self.checkpoint_dir/ f"{self.target}_res_{res['id']}.json"
             if file_path.exists() and rerun==False:
                 print(f"File already exists:{file_path}")
                 continue 
@@ -691,11 +695,11 @@ class TargetResults:
         config_stats = []
         for res in self.options["clustering"]:
             # print(res)
-            main_file_path = self.checkpoint_dir/ f"{self.target}_res_{res["id"]}.json"
+            main_file_path = self.checkpoint_dir/ f"{self.target}_res_{res['id']}.json"
             if main_file_path.exists() is None : 
                 # print(f"Main result file not generated :{main_file_path}")
                 continue 
-            file_path = self.checkpoint_dir/ f"{self.target}_clusters_{res["id"]}.csv"
+            file_path = self.checkpoint_dir/ f"{self.target}_clusters_{res['id']}.csv"
             if file_path.exists() and rerun==False:
                 # print(f"File already exists:{file_path}")
                 continue 

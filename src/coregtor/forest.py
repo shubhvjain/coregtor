@@ -20,18 +20,18 @@ from coregtor.utils.error import CoRegTorError
 # Type aliases for better readability
 PathLike = Union[str, Path]
 
-def create_model_input(raw_ge_data: pd.DataFrame,target_gene:str,t_factors: pd.DataFrame = None) -> tuple[pd.DataFrame, pd.DataFrame]:
+def create_model_input(raw_ge_data: pd.DataFrame,target_gene:str,t_factors: list = None) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Prepare gene expression data for training.
 
     This function splits the gene expression DataFrame into features (X) and target (Y) for supervised learning.
 
-    Additionally, if a list of t_factors is provided, X is filtered to include ony Transcription factors. 
+    Additionally, if a list of t_factors is provided, X is filtered to include only Transcription factors. 
     
     Args:
       raw_ge_data (pd.DataFrame) : Gene expression data in samples x genes format. NO processing done. 
       target_gene (str) :  Name of the target gene to predict. Must be present in raw_ge_data columns
-      t_factors (pd.DataFrame) :  A DataFrame containing transcription factor gene names. It must have a column named 'gene_name' listing the TF genes. This DataFrame is used to filter the input gene expression data. 
+      t_factors (list) :  A list of transcription factor gene names. 
       
     Returns:
       tuple[pd.DataFrame, pd.DataFrame] :  X - Feature matrix (samples x genes) excluding target gene; Y - Target vector (samples x 1) containing only target gene expression
@@ -49,9 +49,8 @@ def create_model_input(raw_ge_data: pd.DataFrame,target_gene:str,t_factors: pd.D
     Y = raw_ge_data[[target_gene]]
 
     # Get feature columns
-    if t_factors is not None and not t_factors.empty:
-        tf_list = t_factors['gene_name'].tolist()
-        X_cols = [gene for gene in tf_list if gene in raw_ge_data.columns and gene != target_gene]
+    if t_factors is not None and len(t_factors)>0:
+        X_cols = [gene for gene in t_factors if gene in raw_ge_data.columns and gene != target_gene]
     else:
         # Use all columns except target if no t_factors provided
         X_cols = [col for col in raw_ge_data.columns if col != target_gene]
