@@ -1,6 +1,6 @@
 [project]
 name = "coregtor"
-version = "0.2.7"
+version = "0.2.8"
 description = "A tool to predict transcription co-regulators for a gene from gene expression data using random forest methods"
 authors = [{name = "Shubh Vardhan Jain", email = "shubhvjain@gmail.com"}]
 license = "MIT"

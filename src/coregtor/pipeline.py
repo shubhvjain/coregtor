@@ -183,6 +183,9 @@ SCHEMA = {
 class Pipeline:
     def __init__(self,expression_data:pd.DataFrame,tflist:list,options: Dict[str, Any],exp_title: str = None):
         
+        if expression_data is None:
+            raise ValueError("No expression data provided.")
+        
         self.expression_data = expression_data
         
         if tflist is None or len(tflist)==0:
@@ -203,8 +206,9 @@ class Pipeline:
         self.title = exp_title.replace(" ", "_") if exp_title else f"Exp_{int(time.time())}"
 
         if self.options.get("checkpointing", True):
-            
-            self.checkpoint_dir = Path(os.path.expanduser(os.path.expandvars(self.options.get("paths").get("temp")))) / self.title 
+            #if self.options.get("paths").get("temp") is None:
+            #    raise ValueError("")
+            self.checkpoint_dir = Path(os.path.expanduser(os.path.expandvars(self.options.get("paths").get("temp"))))
             self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
     
 
