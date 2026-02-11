@@ -120,6 +120,7 @@ SCHEMA = {
         },
         # === PIPELINE CONTROL ===
         "checkpointing": {"type": "boolean", "default": True},
+        "save_model": {"type": "boolean", "default": False},
         "force_fresh": {"type": "boolean", "default": False},
         "input":{"type":"object","default":{"expression":"","tflist":""}},
         "paths":{"input":{"type":"str","default":""},"output":{"type":"str","default":""},"temp":{"type":"str","default":""}},
@@ -283,6 +284,8 @@ class Pipeline:
         stats = {"timing": {}, "quality": {}}
         results = {}
         status = {"success":False, "error":""}
+
+        save_model = self.options.get("save_model",False)
         
         try:
           # 1. Validate target exists
@@ -305,8 +308,9 @@ class Pipeline:
           timing = end_time - start_time
           #print(f"model_train: {timing:.3f}s")
           stats["timing"]["model_train"] = timing
-          
-          results["model"] = model
+
+          if save_model:
+            results["model"] = model
           
           # 4. Tree paths
           tree_paths_config = self.options.get("tree_paths")
@@ -505,7 +509,10 @@ class PipelineResults:
         
         self.title = exp_title
             
-        self.checkpoint_dir = Path(os.path.expanduser(os.path.expandvars(self.options.get("paths").get("temp")))) / self.title 
+        self.checkpoint_dir = Path(os.path.expanduser(os.path.expandvars(self.options.get("paths").get("temp"))))
+
+        self.output_dir = Path(os.path.expanduser(os.path.expandvars(self.options.get("paths").get("output"))))
+
             
             
     def _get_targets(self) -> List[str]:
@@ -555,20 +562,20 @@ class PipelineResults:
         }).reset_index()
         grouped  = grouped.drop(columns=["cluster_id"])
         grouped = grouped.sort_values(by=["target"])
-        groups_path = self.checkpoint_dir / "cluster_groups.csv"
+        groups_path = self.output_dir / "cluster_groups.csv"
         grouped.to_csv(groups_path, index=False)
         print(f"Saved cluster_groups.csv: {len(grouped)} unique clusters")
          
         # Step 2: Clean clusters.csv (single drop operation)
         clean_clusters = full_clusters.drop(columns=["methodology", "exp_details"], errors="ignore")
-        clusters_path = self.checkpoint_dir / "clusters.csv"
+        clusters_path = self.output_dir / "clusters.csv"
         clean_clusters.to_csv(clusters_path, index=False)
         print(f"Saved clusters.csv: {len(clean_clusters)} rows (cleaned)")
         
         # Step 3: cluster_configs.csv
         if config_rows:
             configs_df = pd.DataFrame(config_rows)
-            configs_path = self.checkpoint_dir / "cluster_configs.csv"
+            configs_path = self.output_dir / "cluster_configs.csv"
             configs_df.to_csv(configs_path, index=False)
             print(f"Saved cluster_configs.csv: {len(config_rows)} rows")
         
@@ -624,7 +631,7 @@ class TargetResults:
         if self.target is None:
             raise ValueError("No target provided")
         
-        self.checkpoint_dir = Path(os.path.expandvars(self.options["paths"]["temp"]))/ self.exp_title
+        self.checkpoint_dir = Path(os.path.expandvars(self.options["paths"]["temp"]))
 
         checkpoint_file1 =  self.checkpoint_dir / f"{self.target}.pkl"
 
