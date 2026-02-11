@@ -186,6 +186,9 @@ class Pipeline:
         if expression_data is None:
             raise ValueError("No expression data provided.")
         
+        if type(tflist) is not list:
+            raise ValueError("TFlist must be a non empty list")
+        
         self.expression_data = expression_data
         
         if tflist is None or len(tflist)==0:
@@ -401,7 +404,7 @@ class Pipeline:
           status["success"]= False
           status["error"] = str(e) 
           if hasattr(e, 'code'):
-              status["error_code"] = e.code  # Bonus: include code
+              status["error_code"] = e.code 
           if hasattr(e, 'details'):
               status["error_details"] = e.details
 
@@ -411,17 +414,52 @@ class Pipeline:
           
           if self.options.get("checkpointing", True):
               self._save_checkpoint(target)
+          raise e
     
+    def _save_running_status(self,status):
+        status_path = self.checkpoint_dir/ "run_status.json"
+        with open(status_path,"w") as f:
+            json.dump(status,f)
+
     def run(self):
         targets = self._get_targets()
-        for target in targets:
-            if self._checkpoint_exists(target):
-                # self._load_checkpoint(target)
-                print(f"{target} already processed")
-            else:
-                self._run_single_target(target)
-        print("Run success")
-    
+        status = {
+            "total":len(targets),
+            "success":0,
+            "already":0,
+            "errors":0,
+            "error_list":[],
+            "under_progress":True
+        }
+        total = len(targets)
+        save_interval = max(1, min(total // 100, 500))
+        for idx, target in enumerate(targets):
+            try:
+                if self._checkpoint_exists(target):
+                    # self._load_checkpoint(target)
+                    print(f"{target} already processed")
+                    status["already"] += 1
+                else:
+                    self._run_single_target(target)
+                    status["success"] += 1
+                print(f"{target} run success")
+                
+            except Exception as e:
+                print("====Error in processing======")
+
+                print("Target:",target)
+                print(e)
+                status["errors"] += 1
+                status["error_list"].append(target)
+                pass
+            if (idx+1) % save_interval == 0:
+                self._save_running_status(status)
+        print(status)
+        status["under_progress"]= False
+        self._save_running_status(status)
+        print("Done.Status file saved")
+        
+
 
     @staticmethod
     def _generate_default_config_dict() -> Dict[str, Any]:
@@ -469,17 +507,11 @@ class PipelineResults:
             
         self.checkpoint_dir = Path(os.path.expanduser(os.path.expandvars(self.options.get("paths").get("temp")))) / self.title 
             
-        
-    def _auto_discover_targets(self) -> List[str]:
-        tfs = set(self.tflist)
-        genes_in_data = set(self.expression_data.columns)
-        all_non_tf_targets = genes_in_data - tfs
-        return sorted(list(all_non_tf_targets))
-    
+            
     def _get_targets(self) -> List[str]:
         targets = self.options.get("target_genes", [])
         if not targets:
-            return self._auto_discover_targets()
+            raise ValueError("No targets specified")
         return targets
 
     def generate_full_exp_results(self):
