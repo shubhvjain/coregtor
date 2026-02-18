@@ -37,7 +37,7 @@ def _compute_auto_threshold(sim_matrix, method, linkage1):
     """Compute automatic distance threshold using specified method.
     
     Methods:
-    - 'inconsistency': Statistical jumps in dendrogram [μ(coeffs) + 0.5σ]
+    - 'inconsistency': Statistical jumps in dendrogram [μ(coeffs) + 0.5]
     - 'elbow': Largest gap in last 10 merge heights 
     - 'percentile': 75th percentile of all pairwise distances (fastest)
     
@@ -69,7 +69,8 @@ def _compute_auto_threshold(sim_matrix, method, linkage1):
         Z[:,-10:,2] = last 10 merge heights [0.12,0.23,...,0.89←jump!,1.02]
         diffs = np.diff(heights), threshold = heights[max_diff_idx]
         """
-        merge_heights = Z[-min(10, len(Z)), 2]
+        merge_heights = Z[-min(10, len(Z)):, 2]  
+        # merge_heights = Z[-min(10, len(Z)), 2]
         if len(merge_heights) < 2:
             return np.median(squareform(dist_matrix))
         diffs = np.diff(merge_heights)
