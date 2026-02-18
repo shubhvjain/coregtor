@@ -8,8 +8,8 @@ import pandas as pd
 import numpy as np
 from typing import Dict, Any, Optional, Tuple
 from sklearn.cluster import AgglomerativeClustering
-from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
-from scipy.cluster.hierarchy import linkage, fcluster, inconsistent
+from sklearn.metrics import silhouette_samples
+from scipy.cluster.hierarchy import linkage, inconsistent
 
 from scipy.spatial.distance import squareform
 from coregtor.utils.error import CoRegTorError
@@ -94,109 +94,50 @@ def _format_clusters_df(
     target_gene: str, 
     min_module_size: int = 2
 ) -> pd.DataFrame:
-  """
-  Convert raw clustering labels into gene-level  DataFrame with quality scores.
-    
-  Example:
-    target_gene | cluster_id | cluster_uid | gene  | score
-    ESR1        | 1          | a1b2c3d4e5f6| ESR1  | 0.85
-    ESR1        | 1          | a1b2c3d4e5f6| FOXA1 | 0.72
-    ESR1        | 2          | x9y8z7w6v5u4| FOXA2 | 0.61
-    
-  Args:
-    sim_matrix: Square gene-gene SIMILARITY matrix DataFrame
-    cluster_labels: Array matching sim_matrix.index [0,0,1,2,1,...]
-    target_gene: Name of target gene (added as column)
-    min_module_size: Drop clusters with fewer genes
-  
-  Returns:
-    Sorted DataFrame ready for downstream analysis/visualization
-  """
-  
-  # 1. Ensure we have validated distance matrix
-  dist_matrix = _ensure_distance_matrix(sim_matrix)
-  gene_names = sim_matrix.index.astype(str)
-  
-  # 2. Calculate silhouette scores PER GENE (higher = better cluster fit)
-  sil_scores = silhouette_score(dist_matrix, cluster_labels, metric='precomputed')
-  
-  # 3. Build DataFrame + filter small clusters
-  gene_clusters = pd.DataFrame({
-      'gene': gene_names,
-      'cluster_id': cluster_labels,
-      'score': sil_scores
-  })
-  
-  # Remove singletons (biological noise)
-  cluster_sizes = gene_clusters['cluster_id'].value_counts()
-  valid_clusters = cluster_sizes[cluster_sizes >= min_module_size].index
-  gene_clusters = gene_clusters[gene_clusters['cluster_id'].isin(valid_clusters)]
-  
-  # 4. Clean cluster numbering (1,2,3... regardless of algorithm)
-  unique_clusters = sorted(gene_clusters['cluster_id'].unique())
-  mapping = {old_id: new_id for new_id, old_id in enumerate(unique_clusters, 1)}
-  gene_clusters['cluster_id'] = gene_clusters['cluster_id'].map(mapping)
-  
-  # 5. Unique cluster identifiers (for database, cross-analysis tracking)
-  cluster_uids = {cid: secrets.token_hex(6) for cid in gene_clusters['cluster_id'].unique()}
-  gene_clusters['cluster_uid'] = gene_clusters['cluster_id'].map(cluster_uids)
-  
-  # 6. Final DataFrame (target_gene column + sort order)
-  df = gene_clusters[['cluster_id', 'cluster_uid', 'gene', 'score']]
-  df.insert(0, 'target_gene', target_gene)
-  
-  # Sort: cluster_id ASC, score DESC  best genes first within each cluster
-  return df.sort_values(['cluster_id', 'score'], ascending=[True, False]).reset_index(drop=True)
+    dist_matrix = _ensure_distance_matrix(sim_matrix)
+    gene_names = sim_matrix.index.astype(str)
+    total_genes = len(gene_names)
 
+    unique_labels = np.unique(cluster_labels)
+    single_cluster = len(unique_labels) < 2
 
-def get_best_cluster(clusters_df: pd.DataFrame) -> Dict[str, Any]:
-  """Returns the best cluster based on the computed score.
-  
-  Selects cluster with highest average silhouette score.
-  
-  Args:
-    clusters_df: DataFrame from _format_clusters_df with columns 
-      ['target_gene', 'cluster_id', 'cluster_uid', 'gene', 'score']
-  
-  Returns:
-    Dict: {'genes': list[str], 'score': float, 'cluster_uid': str, 'n_genes': int}
-  """
-  if clusters_df.empty:
-    return {'genes': [], 'score': 0.0, 'cluster_uid': '', 'n_genes': 0}
-  
-  # Compute average score per cluster
-  cluster_avg_scores = clusters_df.groupby('cluster_id')['score'].mean()
-  best_cluster_id = cluster_avg_scores.idxmax()
-  
-  # Extract best cluster data
-  best_rows = clusters_df[clusters_df['cluster_id'] == best_cluster_id]
-  genes = best_rows['gene'].tolist()
-  
-  return {
-      'genes': genes,
-      'score': float(cluster_avg_scores[best_cluster_id]),
-      'cluster_uid': best_rows['cluster_uid'].iloc[0],
-      'n_genes': len(genes)
-  }
+    # Compute per-gene silhouette only if we have multiple clusters
+    if single_cluster:
+        sil_per_gene = np.zeros(len(gene_names))
+    else:
+        sil_per_gene = silhouette_samples(dist_matrix, cluster_labels, metric='precomputed')
 
+    # Build gene-level frame
+    gene_df = pd.DataFrame({
+        'gene': gene_names,
+        'cluster_id': cluster_labels,
+        'sil': sil_per_gene
+    })
 
+    # Filter small clusters
+    cluster_sizes = gene_df['cluster_id'].value_counts()
+    valid_clusters = cluster_sizes[cluster_sizes >= min_module_size].index
+    gene_df = gene_df[gene_df['cluster_id'].isin(valid_clusters)].copy()
 
+    if gene_df.empty:
+        return pd.DataFrame(columns=['cluster_uid', 'target', 'sources', 'n_sources', 'n_percent', 'silhouette_score'])
 
-def format_methodology(method: str, options: Dict[str, Any]) -> str:
-  """Format method name and options into standardized methodology string.
+    # Aggregate to one row per cluster
+    rows = []
+    for cluster_id, group in gene_df.groupby('cluster_id'):
+        genes = group.sort_values('sil', ascending=False)['gene'].tolist()
+        n_sources = len(genes)
+        sil_score = 0.0 if single_cluster else round(group['sil'].mean(), 4)
+        rows.append({
+            'cluster_uid': secrets.token_hex(6),
+            'target': target_gene,
+            'sources': ';'.join(genes),
+            'n_sources': n_sources,
+            'n_percent': round(n_sources / total_genes, 4)*100,
+            'silhouette_score': sil_score,
+        })
 
-  Args:
-    method: Clustering method name.
-    options: Method parameter dictionary.
-
-  Returns:
-    URL-encoded methodology string.
-  """
-  parts = [f"method={method}"]
-  for key, value in options.items():
-    parts.append(f"{key}={value}")
-  return "&".join(parts)
-
+    return pd.DataFrame(rows).sort_values('silhouette_score', ascending=False).reset_index(drop=True)
 
 def hierarchical_clustering(
     sim_matrix: pd.DataFrame, 
@@ -258,23 +199,12 @@ def hierarchical_clustering(
   
   clusters_df = _format_clusters_df(sim_matrix, labels, target_gene, min_module_size)
 
-  best_cluster = get_best_cluster(clusters_df)
-
   params.update({
        "auto_threshold" : auto_threshold,
       'min_module_size': min_module_size,
       'scoring_index': 'silhouette',
   })
-  
-  methodology = format_methodology("hierarchical_clustering", params)
-  
-  return {
-      'model': model,
-      'clusters_df': clusters_df,
-      'best_cluster': best_cluster,
-      'methodology': methodology
-  }
-
+  return model,clusters_df 
 
 # def validation_index(
 #     sim_matrix: pd.DataFrame, 
