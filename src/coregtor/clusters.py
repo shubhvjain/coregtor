@@ -96,14 +96,13 @@ def _format_clusters_df(
 ) -> pd.DataFrame:
     dist_matrix = _ensure_distance_matrix(sim_matrix)
     gene_names = sim_matrix.index.astype(str)
-    total_genes = len(gene_names)
-
+    n_samples = len(gene_names)
     unique_labels = np.unique(cluster_labels)
-    single_cluster = len(unique_labels) < 2
+    n_unique = len(unique_labels)
 
-    # Compute per-gene silhouette only if we have multiple clusters
-    if single_cluster:
-        sil_per_gene = np.zeros(len(gene_names))
+    valid_for_silhouette = 2 <= n_unique <= n_samples - 1
+    if not valid_for_silhouette:
+        sil_per_gene = np.zeros(n_samples)
     else:
         sil_per_gene = silhouette_samples(dist_matrix, cluster_labels, metric='precomputed')
 
@@ -127,13 +126,13 @@ def _format_clusters_df(
     for cluster_id, group in gene_df.groupby('cluster_id'):
         genes = group.sort_values('sil', ascending=False)['gene'].tolist()
         n_sources = len(genes)
-        sil_score = 0.0 if single_cluster else round(group['sil'].mean(), 4)
+        sil_score = 0.0 if not valid_for_silhouette else round(group['sil'].mean(), 4)
         rows.append({
             'cluster_uid': secrets.token_hex(6),
             'target': target_gene,
             'sources': ';'.join(genes),
             'n_sources': n_sources,
-            'n_percent': round(n_sources / total_genes, 4)*100,
+            'n_percent': round(n_sources / n_samples, 4) * 100,  # total_genes → n_samples
             'silhouette_score': sil_score,
         })
 
@@ -177,6 +176,19 @@ def hierarchical_clustering(
   linkage = method_options.get('linkage', 'average')
   min_module_size = method_options.get('min_module_size', 2)
   
+  if sim_matrix.shape[0] <= 3:
+      gene_names = sim_matrix.index.astype(str).tolist()
+      single_row = pd.DataFrame([{
+          'cluster_uid': secrets.token_hex(6),
+          'target': target_gene,
+          'sources': ';'.join(gene_names),
+          'n_sources': len(gene_names),
+          'n_percent': 100.0,
+          'silhouette_score': 0.0,  # undefined for single cluster
+      }])
+      return None, single_row
+
+
   auto_threshold = method_options.get('auto_threshold',None)
   if auto_threshold:
     if n_clusters or distance_threshold:
@@ -188,6 +200,8 @@ def hierarchical_clustering(
   if n_clusters is not None and distance_threshold is not None:
     raise CoRegTorError("Cannot specify both  n_clusters and  distance_threshold")
   
+
+
   dist_matrix = _ensure_distance_matrix(sim_matrix)
   params = {'metric': 'precomputed', 'linkage': linkage}
   params['n_clusters'] = n_clusters
