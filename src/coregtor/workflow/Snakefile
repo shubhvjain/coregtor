@@ -1,0 +1,70 @@
+import os
+from dotenv import load_dotenv
+import json
+from pathlib import Path
+
+import coregtor.workflow.util as ut
+import coregtor.workflow.init as init
+
+
+# 1. Get the env file name from the command line: --config env=project.env
+env_file = config.get("env", ".env.local")
+
+if os.path.exists(env_file):
+    load_dotenv(env_file)
+else:
+    raise ValueError(f"Environment file '{env_file}' not found.")
+
+#  Extract paths
+OUT_DIR = os.getenv("EXP_OUTPUT_PATH")
+TEMP_DIR = os.getenv("EXP_TEMP_PATH")
+DATA_DIR = os.getenv("DATA_PATH")
+
+
+# Basic validation to ensure the file loaded the keys you expect
+if not all([OUT_DIR, TEMP_DIR]):
+    raise ValueError("Missing required variables in env file.")
+
+
+# input file check 
+input_file = config.get("input",None)
+
+if input_file is None:
+  raise ValueError("Input file not provided")
+
+exp_path = Path(os.path.expandvars(input_file)).resolve()
+
+with open(exp_path,"r") as f:
+  EXP = json.load(f)
+
+# print(EXP)
+ID = EXP.get("id",None) # experiment id
+if ID is None:
+  raise ValueError("Experiment file must have an id")
+EXP_OUT = os.path.join(OUT_DIR, ID) 
+EXP_TEMP = os.path.join(TEMP_DIR, ID) 
+# Now exp has all the data about the experiment to run 
+
+CONFIG = {
+  "out_path": Path(OUT_DIR),
+  "temp_path": Path(TEMP_DIR),
+  "data_path": Path(DATA_DIR)
+}
+
+
+INIT_DONE_INDICATOR_FILE = os.path.join(EXP_TEMP, "init_done.txt")
+EXP_INPUT_FILE = exp_path
+
+rule all:
+    input:
+        INIT_DONE_INDICATOR_FILE
+
+rule init:
+    input:
+        EXP_INPUT_FILE
+    output:
+        INIT_DONE_INDICATOR_FILE
+    run:
+        print("Running init")
+        init.setup_experiment(EXP,CONFIG)
+
