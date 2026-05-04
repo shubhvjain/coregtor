@@ -5,7 +5,7 @@ from pathlib import Path
 
 import coregtor.workflow.util as ut
 import coregtor.workflow.init as init
-
+import coregtor.workflow.run as run 
 
 # 1. Get the env file name from the command line: --config env=project.env
 env_file = config.get("env", ".env.local")
@@ -55,16 +55,25 @@ CONFIG = {
 INIT_DONE_INDICATOR_FILE = os.path.join(EXP_TEMP, "init_done.txt")
 EXP_INPUT_FILE = exp_path
 
-rule all:
-    input:
-        INIT_DONE_INDICATOR_FILE
+
+# rule all:
+#     input:
+#         INIT_DONE_INDICATOR_FILE
 
 rule init:
     input:
-        EXP_INPUT_FILE
+        ancient(EXP_INPUT_FILE)
     output:
         INIT_DONE_INDICATOR_FILE
     run:
         print("Running init")
         init.setup_experiment(EXP,CONFIG)
 
+
+rule batch:
+    input:
+        INIT_DONE_INDICATOR_FILE
+    run:
+        print("Running batch")
+        n_items =  config.get("items",100)
+        run.run_batch(EXP,CONFIG,n_items)

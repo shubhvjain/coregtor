@@ -18,8 +18,8 @@ def get_mappings(CONFIG, gene_list, source, target, batch_size=900):
         Dictionary mapping {source_value: target_value, ...}
     """
     db_path = CONFIG["data_path"]/"gencode"/"gene_name_mapping.db"
-    print(db_path)
-    print(db_path.exists())
+    #print(db_path)
+    #print(db_path.exists())
     con = sqlite3.connect(db_path)
 
     try:
