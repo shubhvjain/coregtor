@@ -148,3 +148,5 @@ Thumbs.db
 
 docs/temp
 temp
+
+.snakemake

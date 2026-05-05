@@ -15,6 +15,5 @@ This is the documentation for CoRegTor`, which stands for CO-REulators of a Gene
    start
    tutorial1
    pipeline
-   biology
    maths
    api

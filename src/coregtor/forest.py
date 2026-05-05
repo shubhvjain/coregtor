@@ -83,7 +83,7 @@ def _expression_pre_checks(X,Y, min_threshold=0.10):
         raise CoRegTorError(f"Only {non_zeros}/{total} ({pct_nonzero:.1%}) non-zeros. Need ≥{min_required}.","validation")
         
 
-def create_model(X,Y,model="rf",model_options={"max_depth":5,"n_estimators":1000}):
+def create_model(X,Y,method="rf",options={"max_depth":5,"n_estimators":1000}):
     """
     Train an ensemble regression model to predict the expression of the target gene Y using the expression values of other genes in the gene expression data X.
 
@@ -92,8 +92,8 @@ def create_model(X,Y,model="rf",model_options={"max_depth":5,"n_estimators":1000
     Args:
         X (pd.DataFrame) : Gene expression data (sample by genes). This can be generated using the :py:func:`create_model_input` method
         Y (pd.DataFrame) : Gene expression data for the target gene. This can be generated using the `create_model_input` method.
-        model (str) : The type of ensemble based model. This must be a valid model in sklearn.ensemble module. Use `rf` (default) for random forest regressor,  `et` for extra trees regressor
-        model_options (dict,optional) : Dictionary of key value pairs to specify training options. See the scikit-learn model docs for options: `RandomForestRegressor <https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestRegressor.html>`_ or  `ExtraTreesRegressor <https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.ExtraTreesRegressor.html>`_
+        method (str) : The type of ensemble based model. This must be a valid model in sklearn.ensemble module. Use `rf` (default) for random forest regressor,  `et` for extra trees regressor
+        options (dict,optional) : Dictionary of key value pairs to specify training options. See the scikit-learn model docs for options: `RandomForestRegressor <https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestRegressor.html>`_ or  `ExtraTreesRegressor <https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.ExtraTreesRegressor.html>`_
 
     Returns:
        Trained sklearn ensemble model
@@ -102,12 +102,12 @@ def create_model(X,Y,model="rf",model_options={"max_depth":5,"n_estimators":1000
     # per check #1 if Y all Y values are 0, skip model 
     _expression_pre_checks(X,Y)
 
-    if model == "rf":
-        ensemble = RandomForestRegressor(**model_options)
-    elif model == "et":
-        ensemble = ExtraTreesRegressor(**model_options)
+    if method == "rf":
+        ensemble = RandomForestRegressor(**options)
+    elif method == "et":
+        ensemble = ExtraTreesRegressor(**options)
     else:
-        raise CoRegTorError(f"Invalid method '{model}'. Must be 'rf' or 'et'","validation") 
+        raise CoRegTorError(f"Invalid method '{method}'. Must be 'rf' or 'et'","validation") 
     
     # Train the model and measure time
     ensemble.fit(X, Y.values.ravel())

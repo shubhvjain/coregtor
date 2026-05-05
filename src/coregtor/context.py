@@ -5,6 +5,15 @@ from collections import Counter
 from sklearn.metrics.pairwise import cosine_similarity
 from coregtor.utils.error import CoRegTorError
 
+from sklearn.metrics.pairwise import cosine_similarity
+from scipy.stats import wasserstein_distance
+from sklearn.metrics.pairwise import euclidean_distances
+from sklearn.metrics.pairwise import pairwise_distances
+from scipy.spatial.distance import cdist
+from sklearn.metrics.pairwise import pairwise_distances
+import pandas as pd
+import numpy as np
+
 #----------------
 # Create context
 #----------------
@@ -192,55 +201,175 @@ def transform_context(
     transformer = CONTEXT_TRANSFORMS[method]
     return transformer(context_set, **kwargs)
 
+
 #-----------------
 # Compare Context
 #-----------------
 
-def _compare_cosine(transformed_data: pd.DataFrame, **kwargs) -> pd.DataFrame:
+
+def sim_to_dist(sim):
     """
-    Compute pairwise cosine similarity between all sources.
-    
-    Args:
-        transformed_data: DataFrame with sources as rows, features as columns
-        **kwargs: Optional parameters
-            - convert_to_distance (bool): If True, convert similarity to distance (default: False)
-    
-    Returns:
-        pd.DataFrame: Symmetric similarity/distance matrix (sources × sources)
+    convert a similarity matrix to distance matrix 
+    d = 1 - s
     """
-    convert_to_distance = kwargs.get('convert_to_distance', False)
-    
-    # Compute cosine similarity matrix
-    similarity_matrix = cosine_similarity(transformed_data.values)
-    
-    # Convert to DataFrame with proper labels
+    arr = np.array(sim, dtype=float)
+    arr = np.clip(arr, 0.0, 1.0)
+    dist = 1.0 - arr
+    np.fill_diagonal(dist, 0)
+    return dist
+
+def gf_cosine_distance(data,**kwargs):
+    """
+    for a given gene frequency matrix 
+    (row - root nodes, cols - gene cols, cell ij is the count of gene j in context for source i), 
+    compute cosine similarity and then convert them into distance
+    """
+
+    sim = cosine_similarity(data.values)
+    dist = sim_to_dist(sim)
     result = pd.DataFrame(
-        similarity_matrix,
-        index=transformed_data.index,
-        columns=transformed_data.index
-    )
-    
-    # Optional conversion to distance
-    if convert_to_distance:
-        result = 1 - result
-    
-    # Store metadata
-    result.attrs['metric'] = 'cosine'
-    result.attrs['is_distance'] = convert_to_distance
-    
+        dist,
+        index=data.index,
+        columns=data.index
+    )    
     return result
 
 
-# Grouped dispatcher: maps transformation types to compatible comparison methods
-COMPARISON_METHODS: Dict[str, Dict[str, Callable]] = {
+def gf_wasserstein_distance(data, **kwargs):
+    """
+    Computes the pairwise Wasserstein distance (Earth Mover's Distance)
+    between all rows in a gene frequency matrix.
+    """
+    # Initialize an empty matrix
+    n_samples = data.shape[0]
+    dist_matrix = np.zeros((n_samples, n_samples))
+    
+    # Get values as a numpy array for speed
+    values = data.values
+    
+    # Compute pairwise distances
+    for i in range(n_samples):
+        for j in range(i + 1, n_samples):
+            d = wasserstein_distance(values[i], values[j])
+            dist_matrix[i, j] = d
+            dist_matrix[j, i] = d
+    
+    result = pd.DataFrame(
+        dist_matrix,
+        index=data.index,
+        columns=data.index
+    )    
+    return result
+
+
+
+def gf_euclidean_distance(data, **kwargs):
+    """
+    Computes the pairwise Euclidean distance between rows.
+    Euclidean distance: sqrt(sum((x - y)^2))
+    """
+    dist = euclidean_distances(data.values)
+    
+    # ensure the diagonal is exactly 0 to handle floating point errors
+    np.fill_diagonal(dist, 0)
+    
+    result = pd.DataFrame(
+        dist,
+        index=data.index,
+        columns=data.index
+    )    
+    return result
+
+
+def gf_weighted_jaccard_distance(data, **kwargs):
+    """
+    Computes the pairwise Weighted Jaccard distance between rows.
+    J = sum(min(xi, yi)) / sum(max(xi, yi))
+    Distance = 1 - J
+    """
+    values = data.values
+    n_samples = values.shape[0]
+    dist_matrix = np.zeros((n_samples, n_samples))
+
+    for i in range(n_samples):
+        for j in range(i + 1, n_samples):
+            v1 = values[i]
+            v2 = values[j]
+            
+            # Calculate sum of mins and maxes
+            sum_min = np.sum(np.minimum(v1, v2))
+            sum_max = np.sum(np.maximum(v1, v2))
+            
+            # Handle division by zero for empty rows
+            if sum_max == 0:
+                dist = 0.0
+            else:
+                similarity = sum_min / sum_max
+                dist = 1.0 - similarity
+            
+            dist_matrix[i, j] = dist
+            dist_matrix[j, i] = dist
+
+    result = pd.DataFrame(
+        dist_matrix,
+        index=data.index,
+        columns=data.index
+    )
+    return result
+
+
+def gf_sorensen_distance(data, **kwargs):
+    """
+    Computes the pairwise Sørensen (Bray-Curtis) distance.
+    Formula: sum(|xi - yi|) / sum(xi + yi)
+    """
+    # cdist is highly optimized for pairwise operations
+    dist = cdist(data.values, data.values, metric='braycurtis')
+    
+    # Ensure diagonal is 0
+    np.fill_diagonal(dist, 0)
+    
+    result = pd.DataFrame(
+        dist,
+        index=data.index,
+        columns=data.index
+    )    
+    return result
+
+
+def gf_manhattan_distance(data, **kwargs):
+    """
+    Computes the pairwise Manhattan (L1) distance between rows.
+    Formula: sum(|xi - yi|)
+    """
+    # 'cityblock' is the standard identifier for Manhattan distance
+    dist = pairwise_distances(data.values, metric='cityblock')
+    
+    # Ensure the diagonal is 0 to handle floating point precision
+    np.fill_diagonal(dist, 0)
+    
+    result = pd.DataFrame(
+        dist,
+        index=data.index,
+        columns=data.index
+    )    
+    return result
+
+
+COMPARISON_METHODS = {
     "gene_frequency": {
-        "cosine": _compare_cosine,
-    },
-    # Universal metrics that work with any numeric data
-    "universal": {
-        "cosine": _compare_cosine,
+        "cosine_distance": gf_cosine_distance,
+        "euclidean_distance":gf_euclidean_distance,
+        "weighted_jaccard":gf_weighted_jaccard_distance,
+        "wasserstein_distance":gf_wasserstein_distance,
+        "manhattan_distance": gf_manhattan_distance,
+        "sorensen_distance": gf_sorensen_distance
     }
 }
+
+def get_distance_measures_list():
+    names = list(set([  m for ctype in COMPARISON_METHODS.values() for m in ctype.keys() ]))
+    return names
 
 
 def _is_compatible(transformation_type: str, method: str) -> bool:
@@ -257,13 +386,10 @@ def _is_compatible(transformation_type: str, method: str) -> bool:
     if transformation_type in COMPARISON_METHODS:
         if method in COMPARISON_METHODS[transformation_type]:
             return True
-    # Check universal metrics
-    if method in COMPARISON_METHODS.get("universal", {}):
-        return True
     return False
 
 
-def list_compatible_methods(transformation_type: str) -> List[str]:
+def _list_compatible_methods(transformation_type: str) -> List[str]:
     """
     List all comparison methods compatible with a transformation type.
     
@@ -281,11 +407,11 @@ def list_compatible_methods(transformation_type: str) -> List[str]:
 
 
 def compare_context(
-    transformed_data: pd.DataFrame,
-    method: str,
-    transformation_type: str = None,
+    transformed_data,
+    method,
+    transformation_type = "gene_frequency",
     **kwargs
-) -> pd.DataFrame:
+):
     """
     Compare contexts using specified similarity/distance metric.
     
@@ -303,13 +429,9 @@ def compare_context(
         CoRegTorError: If method is unknown or incompatible with transformation type
     
     """
-    # Auto-detect transformation type from metadata if not provided
-    if transformation_type is None:
-        transformation_type = transformed_data.attrs.get('transformation_type', 'unknown')
-    
     # Validate compatibility
     if not _is_compatible(transformation_type, method):
-        compatible = list_compatible_methods(transformation_type)
+        compatible = _list_compatible_methods(transformation_type)
         raise  CoRegTorError(
             f"Method '{method}' is not compatible with transformation type {transformation_type}.  Compatible methods: {compatible} "
         )
@@ -317,17 +439,15 @@ def compare_context(
     # Get the comparison function
     if transformation_type in COMPARISON_METHODS and method in COMPARISON_METHODS[transformation_type]:
         comparator = COMPARISON_METHODS[transformation_type][method]
-    elif method in COMPARISON_METHODS.get("universal", {}):
-        comparator = COMPARISON_METHODS["universal"][method]
     else:
         raise CoRegTorError(
-            f"Unknown comparison method: {method}. Available methods: {list_compatible_methods(transformation_type)}"
+            f"Unknown comparison method: {method}. Available methods: {_list_compatible_methods(transformation_type)}"
         )
     
     # Execute comparison
     result = comparator(transformed_data, **kwargs)
     
     # Store transformation type in result metadata
-    result.attrs['transformation_type'] = transformation_type
+    #result.attrs['transformation_type'] = transformation_type
     
     return result
