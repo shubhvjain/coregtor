@@ -50,21 +50,19 @@ def run_batch(exp, config, items=100, batch_id=None):
     
 
     dataset = read_dataset(exp["dataset"],config)
-    tf_list = get_tflist(config)
+    source_genes = input_data["source_genes"]
 
     pipeline_options = {
         **exp,
         "target_genes": input_data["target_genes"],
-        "paths":{
-            "temp": str(temp_path/"results"),
-            "out": str(out_path)
-        }
     }
+    pipeline_options["run"]["temp_path"] = str(temp_path/"results")
+    pipeline_options["run"]["output_path"] = str(out_path)
 
 
     pipeline = CoRegTorPipeline(
         expression_data=dataset,
-        tflist=tf_list,
+        source_genes=source_genes,
         options=pipeline_options,
         exp_title=exp["id"]
     )

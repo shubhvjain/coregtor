@@ -1,6 +1,6 @@
 [project]
 name = "coregtor"
-version = "0.2.17"
+version = "0.2.18"
 description = "A tool to predict transcription co-regulators for a gene from gene expression data using random forest methods"
 authors = [{name = "Shubh Vardhan Jain", email = "shubhvjain@gmail.com"}]
 license = "MIT"
@@ -35,7 +35,6 @@ sphinx-book-theme = "^1.1.4"
 
 [project.scripts]
 "coregtor" = "coregtor.cli:main" 
-"sm" = "coregtor.workflow.main:run"
 
 [tool.poetry]
 packages = [{include = "coregtor", from = "src"}]

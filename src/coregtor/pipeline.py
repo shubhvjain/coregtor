@@ -342,6 +342,7 @@ class CoRegTorPipeline:
     def generate_all_clusters(self, targets, cluster_id="default"):
         """
         """
+        
 
 
 class PipelineResults:

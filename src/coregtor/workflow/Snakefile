@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 
 import coregtor.workflow.util as ut
-import coregtor.workflow.init as init
-import coregtor.workflow.run as run 
+import coregtor.workflow.init as wf_init
+import coregtor.workflow.run as wf_run 
 
 # 1. Get the env file name from the command line: --config env=project.env
 env_file = config.get("env", ".env.local")
@@ -67,7 +67,7 @@ rule init:
         INIT_DONE_INDICATOR_FILE
     run:
         print("Running init")
-        init.setup_experiment(EXP,CONFIG)
+        wf_init.setup_experiment(EXP,CONFIG)
 
 
 rule batch:
@@ -76,4 +76,4 @@ rule batch:
     run:
         print("Running batch")
         n_items =  config.get("items",100)
-        run.run_batch(EXP,CONFIG,n_items)
+        wf_run.run_batch(EXP,CONFIG,n_items)
