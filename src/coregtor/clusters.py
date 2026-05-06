@@ -205,7 +205,7 @@ def community_detection_leiden(dist_matrix, target_gene,options=None):
             "objective_function": "CPM",
             "n_iterations": 2
         }
-    print(options)
+    # print(options)
     g = dist_to_net(dist_matrix, options)
     
 

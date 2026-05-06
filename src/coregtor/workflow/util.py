@@ -76,31 +76,27 @@ def get_tflist(CONFIG):
     return  df["gene_name"].tolist()
 
 
-def get_protein_coding_genes(gene_list,CONFIG):
+def get_protein_coding_genes(gene_list, CONFIG):
     """
-    Takes a list of genes, returns only protein-coding ones
-    
-    Args:
-        gene_list: list of gene names
-        
-    Returns:
-        list of protein-coding gene names
+    Fetches all protein-coding genes once and intersects with input list in memory.
+    Best for one-time calls with large input lists.
     """
     db_path = CONFIG["data_path"] / "gencode" / "gene_name_mapping.db"
-    con = sqlite3.connect(db_path)
     
-    # Get protein-coding genes from the input list
-    placeholders = ','.join(['?'] * len(gene_list))
-    query = f"""
-        SELECT DISTINCT gene_name
-        FROM mappings
-        WHERE gene_name IN ({placeholders})
-        AND gene_type = 'protein_coding'
-    """
+    # 1. Fetch all protein-coding genes from the DB
+    query = "SELECT DISTINCT gene_name FROM mappings WHERE gene_type = 'protein_coding'"
     
-    cursor = con.execute(query, gene_list)
-    protein_coding = [row[0] for row in cursor.fetchall()]
-    con.close()
+    try:
+        with sqlite3.connect(db_path) as con:
+            cursor = con.execute(query)
+            pc_reference_set = {row[0] for row in cursor.fetchall()}
+    except sqlite3.OperationalError as e:
+        print(f"Database error: {e}")
+        return []
+
+    # 2. Use set intersection to find matches
+    gene_list_set = set(gene_list)
+    protein_coding = list(pc_reference_set.intersection(gene_list_set))
     
     return protein_coding
 

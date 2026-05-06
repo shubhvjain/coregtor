@@ -74,6 +74,7 @@ def get_filtered_genes(df, options, tflist, config):
     """
     Selects and filters genes from df based on type and stats.
     """
+    #print(options)
     g_type = options.get("type", "all")
 
     # 1. Selection
