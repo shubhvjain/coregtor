@@ -23,7 +23,8 @@ def run_bulk(extra_args):
     cmd = [
         "snakemake",
         "--snakefile", str(snakefile),
-        "--cores", "1",
+        "--cores", "all",
+        "--nolock"
     ]
     
     # Append the extra arguments (init, batch, --config, etc.)
