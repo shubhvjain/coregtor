@@ -14,7 +14,7 @@ from coregtor.forest import create_model, tree_paths
 from coregtor.context import create_context, transform_context, compare_context, get_distance_measures_list
 from coregtor.utils.error import CoRegTorError
 
-from coregtor.clusters import identify_coregulators
+from coregtor.clusters import identify_coregulators, get_cluster_method_list
 
 from joblib import Parallel, delayed
 
@@ -48,7 +48,7 @@ SCHEMA = {
                     "type": "string", "default": "gene_frequency"
                 }
             },
-            "default":{"method":"tree_paths","output":"gene_frequency"}
+            "default": {"method": "tree_paths", "output": "gene_frequency"}
         },
         "context_comparison": {
             "description": "Distance measures to use. ",
@@ -64,39 +64,44 @@ SCHEMA = {
                     }
                 },
             },
-            "default":["cosine_distance"],
+            "default": ["cosine_distance"],
             "additionalProperties": True
         },
         "clustering": {
             "type": "array",
             "items": {
                 "type": "object",
-                "required": ["id", "distance","method"],
+                "required": ["id", "distance", "method"],
                 "properties": {
                     "id": {"type": "string", "default": "default"},
                     "distance": {"type": "string", "default": "cosine_distance"},
-                    "method": {"type": "string", "enum": ["hierarchical"], "default": "hierarchical"},
+                    "method": {
+                        "type": "string",
+                        "enum": get_cluster_method_list(),
+                        "default": "hierarchical"
+                    },
                     "options": {"type": "object", "default": {"auto_threshold": "inconsistency"}}
                 },
                 "additionalProperties": True
             }
         },
-        "run":{
-            "description":"These options handle the running of pipeline",
+        "run": {
+            "description": "These options handle the running of pipeline",
             "type": "object",
             "properties": {
                 "checkpointing": {"type": "boolean", "default": True},
-                "save_model": {"type": "boolean", "default": False, "description":""},
+                "save_model": {"type": "boolean", "default": False, "description": ""},
                 "save_tree_paths": {"type": "boolean", "default": False},
                 "rerun": {"type": "boolean", "default": False},
-                "temp_path":{"type": "string", "default": ""},
-                "output_path":{"type": "string", "default": ""},
-                "create_folder":{"type":"boolean","default":False,"description":"If true, a new folder will be created inside the temp and output path with the provided exp_title "}
+                "temp_path": {"type": "string", "default": ""},
+                "output_path": {"type": "string", "default": ""},
+                "create_folder": {"type": "boolean", "default": False, "description": "If true, a new folder will be created inside the temp and output path with the provided exp_title "}
             },
             "additionalProperties": True
         }
     }
 }
+
 
 def apply_defaults(data, schema):
     """Recursively apply default values from schema to data where keys are missing."""
@@ -128,6 +133,7 @@ def apply_defaults(data, schema):
 
     return data
 
+
 def get_validated_options(options):
     # 1. validate structure first
     jsonschema.validate(instance=options, schema=SCHEMA)
@@ -136,7 +142,8 @@ def get_validated_options(options):
     cluster_ids = [c["id"] for c in options.get("clustering", []) if "id" in c]
     if len(cluster_ids) != len(set(cluster_ids)):
         duplicates = {id for id in cluster_ids if cluster_ids.count(id) > 1}
-        raise jsonschema.ValidationError(f"Duplicate cluster ids found: {duplicates}")
+        raise jsonschema.ValidationError(
+            f"Duplicate cluster ids found: {duplicates}")
 
     # 3. fill in missing defaults
     import copy
@@ -145,10 +152,12 @@ def get_validated_options(options):
 
     return result
 
+
 def get_default_options():
     result = {}
     apply_defaults(result, SCHEMA)
     return result
+
 
 class CoRegTorPipeline:
     def __init__(self, expression_data, source_genes, options, exp_title=None):
@@ -161,27 +170,34 @@ class CoRegTorPipeline:
         self.expression_data = expression_data
         self.source_genes = source_genes
 
-        #defaults = CoRegTorPipeline._generate_default_config_dict()
-        #options = {**defaults, **(options or {})}
-        #jsonschema.validate(instance=options, schema=SCHEMA)
-        self.options =   get_validated_options(options)
-        print(self.options)
+        # defaults = CoRegTorPipeline._generate_default_config_dict()
+        # options = {**defaults, **(options or {})}
+        # jsonschema.validate(instance=options, schema=SCHEMA)
+        self.options = get_validated_options(options)
+        # print(self.options)
         self.results = {}
         self.stats = {}
         self.status = {}
 
         self.title = exp_title.replace(
             " ", "_") if exp_title else f"exp_{int(time.time())}"
-        
-        # create a folder in  temp locations if required        
+
+        # create a folder in  temp locations if required
         temp_path = self.options["run"]["temp_path"]
         if self.options["run"]["create_folder"]:
             temp_path = f"{temp_path}/{self.title}"
 
         self.checkpoint_dir = Path(temp_path)
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        #print(self.checkpoint_dir)
-        
+
+        out_path = self.options["run"]["output_path"]
+        if self.options["run"]["create_folder"]:
+            out_path = f"{temp_path}/{self.title}"
+
+        self.output_dir = Path(out_path)
+
+        # self.targets = targets  # List of targets to process
+
         self.X_shared = None
         self.feature_columns = None
         self._prepare_shared_X()
@@ -204,7 +220,6 @@ class CoRegTorPipeline:
             X = self.X_shared
         return X, Y
 
-
     def _checkpoint_file(self, target: str) -> Path:
         return self.checkpoint_dir / f"{target}.pkl"
 
@@ -214,9 +229,9 @@ class CoRegTorPipeline:
         f = self._checkpoint_file(target)
         if not f.exists():
             return False
-        else :
+        else:
             return True
-    
+
     def _save_checkpoint(self, target: str):
         checkpoint = {
             "timestamp": time.time(),
@@ -229,9 +244,9 @@ class CoRegTorPipeline:
         self.stats[target] = None
         self.status[target] = None
 
-    def run_single_target(self, target: str):
+    def run_single_target(self, target, rerun=False):
         """Run pipeline for one gene. Raises on failure."""
-        if self._checkpoint_exists(target):
+        if self._checkpoint_exists(target) and not rerun:
             return
 
         stats = {"timing": {}, "quality": {}}
@@ -248,7 +263,6 @@ class CoRegTorPipeline:
             t = time.perf_counter()
             X, Y = self._get_model_input(target)
             stats["timing"]["model_input"] = time.perf_counter() - t
-
 
             t = time.perf_counter()
             model = create_model(X, Y, **self.options.get("ensemble_model"))
@@ -268,26 +282,43 @@ class CoRegTorPipeline:
 
             t = time.perf_counter()
             contexts = create_context(
-                paths, method= context_options.get("method"))
-            
-            transformed = transform_context(contexts, method=context_options.get("output"))
+                paths, method=context_options.get("method"))
+
+            transformed = transform_context(
+                contexts, method=context_options.get("output"))
 
             stats["timing"]["context_create"] = time.perf_counter() - t
             stats["quality"]["n_contexts"] = len(contexts)
-            
+
             results["context"] = contexts
             results["gene_frequency"] = transformed
 
-
             comparison_results = {}
-            
-            comparison_methods = self.options.get("context_comparison").get("methods")
+
+            comparison_methods = self.options.get(
+                "context_comparison").get("methods")
 
             for m in comparison_methods:
-                matrix = compare_context(transformed, method=m,transformation_type="gene_frequency")
+                matrix = compare_context(
+                    transformed, method=m, transformation_type="gene_frequency")
                 comparison_results[m] = matrix
 
             results["distance"] = comparison_results
+
+            # clustering results
+            cluster_results = {}
+            cluster_options = self.options.get("clustering")
+            for c in cluster_options:
+                id = c["id"]
+                dist_matrix = comparison_results[c["distance"]]
+                c_method = c["method"]
+                c_options = c["options"]
+                c_notes = c["note"]
+                res = identify_coregulators(
+                    dist_matrix, target, c_method, c_options, c_notes)
+                cluster_results[id] = res
+
+            results["clusters"] = cluster_results
 
             stats["timing"]["total"] = sum(stats["timing"].values())
             status["success"] = True
@@ -308,6 +339,9 @@ class CoRegTorPipeline:
                 self._save_checkpoint(target)
             raise
 
+    def generate_all_clusters(self, targets, cluster_id="default"):
+        """
+        """
 
 
 class PipelineResults:
