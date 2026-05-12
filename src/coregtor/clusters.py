@@ -16,7 +16,7 @@ from scipy.spatial.distance import squareform
 from sklearn.manifold import MDS
 from sklearn.metrics import silhouette_samples, calinski_harabasz_score, davies_bouldin_score
 import igraph as ig
-
+from sklearn.cluster import HDBSCAN
 from coregtor.utils.error import CoRegTorError
 
 # --- UTILITIES ---
@@ -222,10 +222,62 @@ def community_detection_leiden(dist_matrix, target_gene,options=None):
     return cluster_set, note
 
 
+# ----- HDBSCAN
+
+def hdbscan_clustering(distance_matrix, target_gene, options=None):
+    """
+    Performs HDBSCAN clustering on a precomputed distance matrix.
+    Highly effective for biological data as it identifies 'noise' points.
+    """
+    labels = list(distance_matrix.index)
+    n_items = len(labels)
+
+    if n_items == 0: return set(), "empty"
+    if n_items <= 3: return {tuple(labels)}, "small-set"
+
+    # Default options for biological gene context data
+    if options is None:
+        options = {
+            "min_cluster_size": 3, 
+            "min_samples": 1, 
+            "cluster_selection_epsilon": 0.0
+        }
+
+    # Extract values for the model
+    min_cluster_size = options.get("min_cluster_size", 2)
+    min_samples = options.get("min_samples", 1)
+    epsilon = options.get("cluster_selection_epsilon", 0.0)
+
+    # Initialize and fit HDBSCAN
+    # We use metric='precomputed' since you are passing a distance matrix
+    clusterer = HDBSCAN(
+        min_cluster_size=min_cluster_size,
+        min_samples=min_samples,
+        cluster_selection_epsilon=epsilon,
+        metric='precomputed',
+        cluster_selection_method='eom' # 'Excess of Mass' is standard for bio data
+    )
+    
+    # HDBSCAN expects a numpy array
+    cluster_labels = clusterer.fit_predict(distance_matrix.to_numpy())
+
+    # Map labels to gene names, EXCLUDING noise (-1)
+    clusters = defaultdict(list)
+    for idx, cluster_id in enumerate(cluster_labels):
+        if cluster_id != -1:  # -1 is the HDBSCAN noise label
+            clusters[cluster_id].append(labels[idx])
+    
+    cluster_set = {tuple(sorted(c)) for c in clusters.values()}
+    
+    note = f"hdbscan-mcs{min_cluster_size}-eps{epsilon}"
+    return cluster_set, note
+
+
 
 METHOD_REGISTRY = {
     'hierarchical': hierarchical_clustering,
-    'community_detection':community_detection_leiden
+    'community_detection':community_detection_leiden,
+    'hdbscan': hdbscan_clustering
 }
 
 def get_cluster_method_list():

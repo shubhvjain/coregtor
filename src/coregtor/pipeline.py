@@ -16,7 +16,7 @@ from coregtor.utils.error import CoRegTorError
 
 from coregtor.clusters import identify_coregulators, get_cluster_method_list
 
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed, cpu_count
 
 # keys that affect computation — used for checkpoint hash
 COMPUTE_KEYS = ["create_model", "tree_paths",
@@ -249,7 +249,12 @@ class CoRegTorPipeline:
         if self._checkpoint_exists(target) and not rerun:
             return
 
-        stats = {"timing": {}, "quality": {}}
+        # Total available CPUs (including logical cores)
+        #print(cpu_count()) 
+        # Total physical cores
+        #print(cpu_count(only_physical_cores=True)) 
+
+        stats = {"timing": {}, "quality": {}, "n_cores":cpu_count()}
         results = {}
         status = {"success": False, "error": ""}
 
