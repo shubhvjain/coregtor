@@ -1,16 +1,12 @@
 import pandas as pd
 import re
-from typing import Union, Dict, Any, Dict, Callable, List
+from typing import Union, Dict, Any, Callable, List
 from collections import Counter
-from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.metrics.pairwise import cosine_similarity,euclidean_distances,pairwise_distances
 from coregtor.utils.error import CoRegTorError
 
-from sklearn.metrics.pairwise import cosine_similarity
 from scipy.stats import wasserstein_distance
-from sklearn.metrics.pairwise import euclidean_distances
-from sklearn.metrics.pairwise import pairwise_distances
 from scipy.spatial.distance import pdist, squareform, cdist
-from sklearn.metrics.pairwise import pairwise_distances
 import pandas as pd
 import numpy as np
 
@@ -135,7 +131,6 @@ def _transform_to_gene_frequency(context_set: dict, **kwargs) -> pd.DataFrame:
         pd.DataFrame: Rows are sources, columns are genes, values are frequencies/proportions. The name of root genes is the index.
 
     """
-    normalize = kwargs.get('normalize', False)
     min_frequency = kwargs.get('min_frequency', 1)
 
     # Collect gene frequencies for each source
@@ -162,13 +157,8 @@ def _transform_to_gene_frequency(context_set: dict, **kwargs) -> pd.DataFrame:
     df = pd.DataFrame(freq_data).T
     df = df.fillna(0).astype(int)  # Fill missing values with 0
 
-    # Optional normalization
-    if normalize:
-        df = df.div(df.sum(axis=1), axis=0)  # Normalize each row to sum to 1
-
     # Store metadata about transformation type
     df.attrs['transformation_type'] = 'gene_frequency'
-    df.attrs['normalized'] = normalize
 
     return df
 

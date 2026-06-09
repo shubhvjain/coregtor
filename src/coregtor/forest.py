@@ -83,7 +83,7 @@ def _expression_pre_checks(X,Y, min_threshold=0.10):
         raise CoRegTorError(f"Only {non_zeros}/{total} ({pct_nonzero:.1%}) non-zeros. Need ≥{min_required}.","validation")
         
 
-def create_model(X,Y,method="rf",options={"max_depth":5,"n_estimators":1000}):
+def create_model(X,Y,method="rf",options={"max_depth":5,"n_estimators":1000},sparsity_threshold = 0.10):
     """
     Train an ensemble regression model to predict the expression of the target gene Y using the expression values of other genes in the gene expression data X.
 
@@ -100,7 +100,7 @@ def create_model(X,Y,method="rf",options={"max_depth":5,"n_estimators":1000}):
     """
 
     # per check #1 if Y all Y values are 0, skip model 
-    _expression_pre_checks(X,Y)
+    _expression_pre_checks(X,Y,sparsity_threshold)
 
     if method == "rf":
         ensemble = RandomForestRegressor(**options)
