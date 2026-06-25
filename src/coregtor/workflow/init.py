@@ -4,13 +4,12 @@ from datetime import datetime
 import sqlite3
 import json
 import pandas as pd
-from coregtor.workflow.util import get_protein_coding_genes, get_tflist, read_dataset
+from coregtor.workflow.util import get_protein_coding_genes, get_tflist, read_dataset, get_exp_path
 
 
 def setup_experiment(exp, config):
     # Construct the full path to the experiment folder
-    exp_dir = Path(config["out_path"]) / exp["id"]
-    temp_dir = Path(config["temp_path"]) / exp["id"]
+    exp_dir,temp_dir = get_exp_path(exp, config)
     done_file = temp_dir / "init_done.txt"
     input_file = exp_dir / "input.json"
     db_file = exp_dir / "status.db"

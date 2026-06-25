@@ -46,9 +46,9 @@ EXP_TEMP = os.path.join(TEMP_DIR, ID)
 # Now exp has all the data about the experiment to run 
 
 CONFIG = {
-  "out_path": Path(OUT_DIR),
-  "temp_path": Path(TEMP_DIR),
-  "data_path": Path(DATA_DIR)
+  "EXP_OUTPUT_PATH": Path(OUT_DIR),
+  "EXP_TEMP_PATH": Path(TEMP_DIR),
+  "DATA_PATH": Path(DATA_DIR)
 }
 
 
@@ -75,5 +75,14 @@ rule batch:
         INIT_DONE_INDICATOR_FILE
     run:
         print("Running batch")
+        n_items =  config.get("items",100)
+        wf_run.run_batch(EXP,CONFIG,n_items)
+
+
+rule result:
+    input:
+        INIT_DONE_INDICATOR_FILE
+    run:
+        print("Running result")
         n_items =  config.get("items",100)
         wf_run.run_batch(EXP,CONFIG,n_items)

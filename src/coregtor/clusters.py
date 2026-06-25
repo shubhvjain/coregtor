@@ -21,6 +21,7 @@ from coregtor.utils.error import CoRegTorError
 
 # --- UTILITIES ---
 
+
 def sim_to_dist(sim):
     """Convert similarity matrix [0,1] to distance matrix [1,0]."""
     arr = np.array(sim, dtype=float)
@@ -28,6 +29,7 @@ def sim_to_dist(sim):
     dist = 1.0 - arr
     np.fill_diagonal(dist, 0)
     return dist
+
 
 def to_clusters(membership, labels):
     """Map cluster IDs to a set of gene-label tuples."""
@@ -38,6 +40,7 @@ def to_clusters(membership, labels):
 
 # --- HIERARCHIAL CLUSTERING ---
 
+
 def auto_threshold(method, z, labels):
     """Heuristic methods to find optimal cut-off for hierarchical clustering."""
     if method == "inconsistency":
@@ -46,7 +49,7 @@ def auto_threshold(method, z, labels):
         threshold = float(np.mean(inc_values) + np.std(inc_values))
         flat_labels = fcluster(z, t=threshold, criterion='inconsistent', R=R)
         note = f"inco-t-{round(threshold, 4)}"
-    
+
     elif method == "elbow":
         merge_distances = z[:, 2]
         acceleration = np.diff(merge_distances, 2)
@@ -54,25 +57,30 @@ def auto_threshold(method, z, labels):
         cut = merge_distances[idx]
         flat_labels = fcluster(z, t=cut, criterion='distance')
         note = f"elbow-t-{round(cut, 4)}"
-    
+
     else:
         raise ValueError(f"Unknown auto_threshold method: {method}")
-        
+
     return to_clusters(flat_labels, labels), note
 
-def hierarchical_clustering(distance,target_gene, options=None):
+
+def hierarchical_clustering(distance, target_gene, options=None):
     """Main entry point for Agglomerative Hierarchical Clustering."""
     labels = list(distance.index)
     n_items = len(labels)
 
-    if n_items == 0: return set(), "empty"
-    if n_items <= 3: return {tuple(labels)}, "small-set"
+    if n_items == 0:
+        return set(), "empty"
+    if n_items <= 3:
+        return {tuple(labels)}, "small-set"
 
     if options is None:
-        options = {"linkage_method": "average", "auto_threshold": "inconsistency"}
+        options = {"linkage_method": "average",
+                   "auto_threshold": "inconsistency"}
 
     condensed_dist = squareform(distance, checks=False)
-    z = linkage(condensed_dist, method=options.get('linkage_method', 'average'))
+    z = linkage(condensed_dist, method=options.get(
+        'linkage_method', 'average'))
 
     # Logic branching for different thresholding strategies
     if 'n_cluster_size' in options:
@@ -110,12 +118,12 @@ def dist_to_net(dist_df, options={}):
     """
     Converts a distance matrix into an UNDIRECTED igraph network.
     Optimized for community detection.
-    
+
     Args:
         dist_df (pd.DataFrame): Distance matrix (columns/index = node labels).
         options (dict): {
             'normalize': bool, 
-            'method': 'edge_threshold_value' | 'edge_threshold_percentile' | 'edge_knn',
+            'method': 'edge_threshold_percentile' | 'edge_knn',
             'value': float/int
         }
     """
@@ -123,7 +131,7 @@ def dist_to_net(dist_df, options={}):
     node_labels = dist_df.columns.tolist()
     dist_mat = dist_df.to_numpy(dtype=float)
     n = len(node_labels)
-    
+
     # 2. NORMALIZATION: Map distances to a 0-1 scale if requested
     if options.get('normalize', False):
         d_min, d_max = dist_mat.min(), dist_mat.max()
@@ -136,23 +144,17 @@ def dist_to_net(dist_df, options={}):
     else:
         # Standard decay: similarity decreases as distance increases
         sim_mat = 1 / (1 + dist_mat)
-    
+
     # Kill the diagonal: a node should not have an edge to itself
     np.fill_diagonal(sim_mat, 0)
-    
+
     # 3. EDGE SELECTION: Use a dict to ensure edges are strictly unique and undirected
     # Format: {(smaller_idx, larger_idx): weight}
     edge_dict = {}
-    method = options.get('edge_creation_method', 'threshold_value')
+    method = options.get('edge_creation_method', 'edge_threshold_percentile')
     val = options.get('edge_creation_value', 0.5)
 
-    if method == 'threshold_value':
-        # Only scan the upper triangle (k=1) to find unique pairs
-        rows, cols = np.where(np.triu(sim_mat, k=1) >= val)
-        for r, c in zip(rows, cols):
-            edge_dict[(r, c)] = sim_mat[r, c]
-                
-    elif method == 'threshold_percentile':
+    if method == 'threshold_percentile':
         # Calculate percentile based only on unique node pairs (upper triangle)
         upper_vals = sim_mat[np.triu_indices(n, k=1)]
         if len(upper_vals) > 0:
@@ -160,7 +162,7 @@ def dist_to_net(dist_df, options={}):
             rows, cols = np.where(np.triu(sim_mat, k=1) >= threshold)
             for r, c in zip(rows, cols):
                 edge_dict[(r, c)] = sim_mat[r, c]
-                
+
     elif method == 'knn':
         k = int(val)
         for i in range(n):
@@ -171,52 +173,52 @@ def dist_to_net(dist_df, options={}):
                     # Sort indices (u < v) so A-B and B-A map to the same key
                     u, v = (i, neighbor) if i < neighbor else (neighbor, i)
                     # Keep the highest similarity if both nodes "pick" each other
-                    edge_dict[(u, v)] = max(edge_dict.get((u, v), 0), sim_mat[i, neighbor])
+                    edge_dict[(u, v)] = max(edge_dict.get(
+                        (u, v), 0), sim_mat[i, neighbor])
+    else:
+        raise ValueError(
+            f"Unknown automated edge creation method: {method}. Use 'threshold_percentile' or 'knn'.")
 
     # 4. ASSEMBLY: Create the igraph object
     edges = list(edge_dict.keys())
     weights = [edge_dict[e] for e in edges]
-    
+
     # directed=False ensures the graph is mathematically undirected
     g = ig.Graph(n=n, edges=edges, directed=False)
     g.vs['name'] = node_labels
     g.es['weight'] = weights
-    
+
     return g
 
-# --- EXAMPLE USAGE ---
-# g = distance_to_network(my_df, {'normalize': True, 'method': 'edge_knn', 'value': 5})
-# clusters = g.community_leiden(weights='weight', objective_function='modularity')
 
-
-def community_detection_leiden(dist_matrix, target_gene,options=None):
+def community_detection_leiden(dist_matrix, target_gene, options=None):
     """
     Performs graph-based community detection on a gene similarity matrix.
-    
+
     This function converts a dense similarity matrix into a sparse graph and 
     optimizes modularity (or CPM) using the Leiden algorithm.
     """
     # Default options for gene clustering
     if options is None:
         options = {
-            "edge_creation_method":"threshold_value",
-            "edge_creation_value":0.5,
-            "resolution": 1.0,                        
+            "edge_creation_method": "threshold_percentile",
+            "edge_creation_value": 0.5,
+            "resolution": 0.5,
             "objective_function": "CPM",
             "n_iterations": 2
         }
     # print(options)
     g = dist_to_net(dist_matrix, options)
-    
 
-    # LEIDEN     
+    # LEIDEN
     partition = g.community_leiden(
-        resolution=options.get("resolution", 1.0), 
+        resolution=options.get("resolution", 1.0),
         objective_function=options.get("objective_function", "CPM"),
         n_iterations=options.get("n_iterations", 2)
     )
-    cluster_set = {tuple(sorted(g.vs[cluster]['name'])) for cluster in partition}
-    
+    cluster_set = {tuple(sorted(g.vs[cluster]['name']))
+                   for cluster in partition}
+
     # Generate a metadata string for the result DataFrame
     note = f"leiden"
     return cluster_set, note
@@ -232,14 +234,16 @@ def hdbscan_clustering(distance_matrix, target_gene, options=None):
     labels = list(distance_matrix.index)
     n_items = len(labels)
 
-    if n_items == 0: return set(), "empty"
-    if n_items <= 3: return {tuple(labels)}, "small-set"
+    if n_items == 0:
+        return set(), "empty"
+    if n_items <= 3:
+        return {tuple(labels)}, "small-set"
 
     # Default options for biological gene context data
     if options is None:
         options = {
-            "min_cluster_size": 3, 
-            "min_samples": 1, 
+            "min_cluster_size": 3,
+            "min_samples": 1,
             "cluster_selection_epsilon": 0.0
         }
 
@@ -249,41 +253,49 @@ def hdbscan_clustering(distance_matrix, target_gene, options=None):
     epsilon = options.get("cluster_selection_epsilon", 0.0)
 
     # Initialize and fit HDBSCAN
-    # We use metric='precomputed' since you are passing a distance matrix
     clusterer = HDBSCAN(
         min_cluster_size=min_cluster_size,
         min_samples=min_samples,
         cluster_selection_epsilon=epsilon,
         metric='precomputed',
-        cluster_selection_method='eom' # 'Excess of Mass' is standard for bio data
+        cluster_selection_method='eom',
+        copy=False
     )
-    
-    # HDBSCAN expects a numpy array
     cluster_labels = clusterer.fit_predict(distance_matrix.to_numpy())
 
-    # Map labels to gene names, EXCLUDING noise (-1)
     clusters = defaultdict(list)
-    for idx, cluster_id in enumerate(cluster_labels):
-        if cluster_id != -1:  # -1 is the HDBSCAN noise label
-            clusters[cluster_id].append(labels[idx])
-    
-    cluster_set = {tuple(sorted(c)) for c in clusters.values()}
-    
-    note = f"hdbscan-mcs{min_cluster_size}-eps{epsilon}"
-    return cluster_set, note
+    singleton_counter = 0
 
+    for idx, cluster_id in enumerate(cluster_labels):
+        if cluster_id != -1:
+            # Group valid cluster members normally
+            clusters[cluster_id].append(labels[idx])
+        else:
+            # FIX: Assign each noise point to a unique standalone cluster ID
+            # This forces the validator to see them as isolated singletons
+            unique_noise_id = f"noise_singleton_{singleton_counter}"
+            clusters[unique_noise_id].append(labels[idx])
+            singleton_counter += 1
+
+    cluster_set = {tuple(sorted(c)) for c in clusters.values()}
+
+    # Track how many noise points were found in the note for your CSV
+    note = f"hdbscan-mcs{min_cluster_size}-noise{singleton_counter}"
+    return cluster_set, note
 
 
 METHOD_REGISTRY = {
     'hierarchical': hierarchical_clustering,
-    'community_detection':community_detection_leiden,
+    'community_detection': community_detection_leiden,
     'hdbscan': hdbscan_clustering
 }
+
 
 def get_cluster_method_list():
     return list(METHOD_REGISTRY.keys())
 
 # --- SCORING & RESULTS ---
+
 
 def silhouette_score(distance_matrix, target_gene, clusters):
     # Flatten clusters to maintain a strict 1-gene-1-label mapping
@@ -293,84 +305,132 @@ def silhouette_score(distance_matrix, target_gene, clusters):
     n_samples = len(ordered_genes)
     n_unique_labels = len(set(labels))
 
-    # EDGE CASE CHECK: 
+    # EDGE CASE CHECK:
     # 1. Need at least 2 clusters to have a "neighbor"
     # 2. Need at least one cluster with >1 member (n_labels must be < n_samples)
     if n_unique_labels < 2 or n_unique_labels >= n_samples:
         return pd.DataFrame({
-            "gene": ordered_genes, 
-            "cluster": labels, 
+            "gene": ordered_genes,
+            "cluster": labels,
             "score": 0.0  # Default to 0 so it fails your >0 filter later
         })
 
     # Ensure the matrix matches our ordered labels
     reordered_matrix = distance_matrix.loc[ordered_genes, ordered_genes]
-        
+
     try:
-        scores = silhouette_samples(reordered_matrix, labels, metric="precomputed")
+        scores = silhouette_samples(
+            reordered_matrix, labels, metric="precomputed")
     except Exception:
         # Catch-all for any other weird sklearn math edge cases
         scores = np.zeros(n_samples)
-    
+
     return pd.DataFrame({
-        "gene": ordered_genes, 
-        "cluster": labels, 
+        "gene": ordered_genes,
+        "cluster": labels,
         "score": np.round(scores, 5)
     })
 
 
-def generate_cluster_results(distance_matrix, target_gene, clusters, note,cluster_note=""):
-    # clusters = [list(c) for c in clusters if len(c) >= 2]
+def generate_cluster_results(distance_matrix, target_gene, clusters, note, cluster_note=""):
     if not clusters:
         return pd.DataFrame()
 
+    # 1. Calculate silhouette scores
     sil_df = silhouette_score(distance_matrix, target_gene, clusters)
+
+    # Check if we have valid, non-NaN numeric scores
     has_scores = sil_df["score"].notna().any()
-    
-    # ch_score, db_score = np.nan, np.nan
-    #if len(clusters) >= 2:
-        #dist = sim_to_dist(distance_matrix)
-        #features = MDS(n_components=2, dissimilarity='precomputed', random_state=42).fit_transform(dist)
-        #ch_score = calinski_harabasz_score(features, labels)
-        #db_score = davies_bouldin_score(features, labels)
+
+    # Dynamically append text to the note if only one cluster was found
+    is_single_cluster = len(clusters) == 1
+    if is_single_cluster:
+        cluster_note = f"{cluster_note} (single-cluster)".strip()
 
     rows = []
-    
     for idx, cluster in enumerate(clusters):
         gene_scores = sil_df[sil_df["cluster"] == idx]
-        if has_scores:
+
+        if has_scores and not is_single_cluster:
             gene_scores = gene_scores.sort_values("score", ascending=False)
+            mean_score = round(gene_scores["score"].mean(), 5)
+        else:
+            mean_score = np.nan
 
         ordered_genes = gene_scores["gene"].tolist()
+        n_genes = len(ordered_genes)
+
+        # --- Calculate Internal Metrics ---
+        if n_genes >= 2:
+            # Extract the compact sub-matrix containing only this cluster's genes
+            sub_matrix = distance_matrix.loc[ordered_genes, ordered_genes].to_numpy()
+            
+            # Extract the unique pairs (upper triangle above diagonal, k=1)
+            upper_tri_indices = np.triu_indices(n_genes, k=1)
+            internal_distances = sub_matrix[upper_tri_indices]
+            
+            # Density: Average distance between all unique internal pairs
+            cluster_density = round(float(np.mean(internal_distances)), 5)
+            
+            # Diameter: Maximum distance between any internal pair
+            cluster_diameter = round(float(np.max(internal_distances)), 5)
+        else:
+            # Fallback for a 1-gene cluster edge-case (though your filters drop these later)
+            cluster_density = 0.0
+            cluster_diameter = 0.0
+
         rows.append({
-            "uid": secrets.token_hex(6),
+            "cluster_uid": secrets.token_hex(7),
             "target": target_gene,
             "sources": ";".join(str(g) for g in ordered_genes),
-            "n_source": len(ordered_genes),
-           
-            "silhouette_score": round(gene_scores["score"].mean(), 5) if has_scores else np.nan,
-            "sil_gene_scores": ";".join(f"{s:.5f}" for s in gene_scores["score"].tolist()) if has_scores else "",
-            "sil_score_optimal": False,
+            "n_source": n_genes,
+            "silhouette_score": mean_score,
+            "cluster_density": cluster_density,
+            "cluster_diameter": cluster_diameter,
             "note": note,
-            "cluster_note":cluster_note
+            "cluster_note": cluster_note
         })
 
     df = pd.DataFrame(rows)
-    if has_scores:
-        df.at[df["silhouette_score"].idxmax(), "sil_score_optimal"] = True
 
-    # include only clusters with 2 or more sources and positive module sill score
-    df = df[(df['silhouette_score']  > 0 ) & (df["n_source"] >= 2)].reset_index(drop=True)
+    # 2. Adjusted Filter:
+    # Keep rows if size >= 2 AND (Score is NaN OR Score is > 0)
+    keep_condition = (df["n_source"] >= 2) & (
+        df["silhouette_score"].isna() | (df["silhouette_score"] > 0))
+    df = df[keep_condition].reset_index(drop=True)
 
     return df
+
+
+def normalize_distance_matrix(distance_matrix):
+    """
+    Min-Max normalizes a distance matrix to a strict [0, 1] scale.
+    Preserves the matrix structure, index, columns, and zero-diagonal.
+    """
+    # Work on a numpy copy to keep it blazing fast
+    mat = distance_matrix.to_numpy(dtype=float)
+
+    d_min = mat.min()
+    d_max = mat.max()
+
+    if d_max > d_min:
+        norm_mat = (mat - d_min) / (d_max - d_min)
+    else:
+        norm_mat = np.zeros_like(mat)
+
+    # Strictly enforce that a gene's distance to itself is exactly 0
+    np.fill_diagonal(norm_mat, 0.0)
+
+    # Reconstruct the DataFrame with original indices/columns
+    return pd.DataFrame(norm_mat, index=distance_matrix.index, columns=distance_matrix.columns)
 
 
 def identify_coregulators(
     distance_matrix,
     target_gene,
-    method  = "hierarchical",
-    options = {},
-    note = ""
+    method="hierarchical",
+    options={},
+    note=""
 ):
     """Identify co-regulatory modules from gene distance matrix.
 
@@ -394,8 +454,16 @@ def identify_coregulators(
         raise CoRegTorError(
             f"Unknown method '{method}'. Available: {available}")
 
+    should_normalize = options.get("normalize_distance", True)
+    if should_normalize:
+        distance_matrix = normalize_distance_matrix(distance_matrix)
+    # print(distance_matrix)
     method_func = METHOD_REGISTRY[method]
-    clusters,cluster_note = method_func(distance_matrix, target_gene, options)
-    results = generate_cluster_results(distance_matrix,target_gene,clusters,note,cluster_note)
+    clusters, cluster_note = method_func(distance_matrix, target_gene, options)
+    # print("=====")
+    # print(clusters)
+    # print("=====")
+    results = generate_cluster_results(
+        distance_matrix, target_gene, clusters, note, cluster_note)
+    # print(results)
     return results
-

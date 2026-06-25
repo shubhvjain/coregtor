@@ -3,7 +3,7 @@ import json
 import sqlite3
 import time 
 
-from coregtor.workflow.util import read_dataset,get_tflist
+from coregtor.workflow.util import read_dataset,get_tflist, get_exp_path
 
 from coregtor.pipeline import CoRegTorPipeline
 
@@ -21,8 +21,7 @@ def run_batch(exp, config, items=100, batch_id=None):
         batch_id = f"Batch-{datetime.now().strftime("%Y%m%d-%H%M%S")}"
         print(batch_id)
 
-    out_path = config["out_path"] / exp["id"]
-    temp_path = config["temp_path"] / exp["id"]
+    out_path,temp_path = get_exp_path(exp, config)
 
     db_file = out_path / "status.db"
 
