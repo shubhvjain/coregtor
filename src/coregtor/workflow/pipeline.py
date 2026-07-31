@@ -12,7 +12,7 @@ import os
 
 from coregtor.forest import create_model, tree_paths
 from coregtor.context import create_context, transform_context, compare_context, get_distance_measures_list
-from coregtor.utils.error import CoRegTorError
+from coregtor.util import CoRegTorError
 
 from coregtor.clusters import identify_coregulators, get_cluster_method_list
 

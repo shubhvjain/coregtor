@@ -1,9 +1,9 @@
 import pandas as pd
 import re
 from typing import Union, Dict, Any, Callable, List
-from collections import Counter
+from collections import Counter, defaultdict
 from sklearn.metrics.pairwise import cosine_similarity,euclidean_distances,pairwise_distances
-from coregtor.utils.error import CoRegTorError
+from coregtor.util import CoRegTorError
 
 from scipy.stats import wasserstein_distance
 from scipy.spatial.distance import pdist, squareform, cdist
@@ -14,21 +14,15 @@ import numpy as np
 # Create context
 # ----------------
 
-
-def _create_context_set_tree_paths(tree_paths: pd.DataFrame, **kwargs) -> dict:
+def _create_context_set_tree_paths(tree_paths: pd.DataFrame, genes: list = None, **kwargs) -> dict:
     """
-    Generate context sets from tree paths DataFrame (excluding root/leaf).
-
-    Args:
-        tree_paths: DataFrame with 'source', 'node1', 'node2', ... columns
-
-    Returns:
-        dict: {source_gene: [list of sub-paths excluding root and leaf]}
+    Generate context sets from tree paths DataFrame (excluding the queried gene and leaf).
+    Single-pass version: scans each path once, extracting sub-paths for every
+    occurrence of any gene of interest at any position.
     """
     if "source" not in tree_paths.columns:
         raise CoRegTorError("DataFrame must contain a 'source' column.")
 
-    # Identify and sort node columns (node1, node2, ...)
     node_cols = []
     for c in tree_paths.columns:
         m = re.fullmatch(r"node(\d+)", str(c))
@@ -38,43 +32,36 @@ def _create_context_set_tree_paths(tree_paths: pd.DataFrame, **kwargs) -> dict:
         raise CoRegTorError("No 'node*' columns found.")
     node_cols = [c for _, c in sorted(node_cols, key=lambda t: t[0])]
 
-    def extract_subpaths(group):
-        """Extract sub-paths (excluding root and leaf) from a group of rows."""
-        subpaths = []
+    all_cols = ["source"] + node_cols
+    full_paths = tree_paths[all_cols].to_numpy(dtype=object)
 
-        # Convert to numpy for faster iteration
-        nodes_arr = group[node_cols].to_numpy(dtype=object)
+    target_genes = set(genes) if genes is not None else set(tree_paths["source"].unique())
 
-        for row in nodes_arr:
-            # Remove NaN values
-            path = [n for n in row if pd.notna(n)]
+    # gene -> set of unique subpath tuples (dedupe via set, convert to list at end)
+    seen = defaultdict(set)
 
-            # Need at least 3 nodes (root, intermediate, leaf)
-            if len(path) >= 3:
-                sub_path = path[1:-1]  # Exclude first (root) and last (leaf)
-                subpaths.append(sub_path)
+    for row in full_paths:
+        path = [g for g in row if pd.notna(g)]
+        n = len(path)
+        if n < 2:
+            continue
 
-        # Remove duplicates while preserving order
-        unique_subpaths = []
-        seen = set()
-        for sp in subpaths:
-            sp_tuple = tuple(sp)
-            if sp_tuple not in seen:
-                seen.add(sp_tuple)
-                unique_subpaths.append(sp)
+        # single pass: check each position once against target_genes
+        for idx in range(n - 1):  # exclude the leaf position itself as a "query" position
+            gene_name = path[idx]
+            if gene_name not in target_genes:
+                continue
+            sub_path = path[idx + 1: -1]
+            if sub_path:
+                seen[gene_name].add(tuple(sub_path))
 
-        return unique_subpaths
+    result = {gene: [list(sp) for sp in subpaths] for gene, subpaths in seen.items()}
 
-    # Group by source and apply extraction function
-    result = (
-        tree_paths
-        .groupby('source', sort=False)
-        .apply(extract_subpaths, include_groups=False)
-        .to_dict()
-    )
+    # ensure all requested genes appear in output, even if no matches found
+    for gene_name in target_genes:
+        result.setdefault(gene_name, [])
 
     return result
-
 
 CONTEXT_SET_METHODS: Dict[str, callable] = {
     "tree_paths": _create_context_set_tree_paths
@@ -84,20 +71,21 @@ CONTEXT_SET_METHODS: Dict[str, callable] = {
 def create_context(
     data: Union[pd.DataFrame, Any],
     method: str = "tree_paths",
+    genes: list = None,
     **kwargs
 ) -> dict:
     """
-    Generates context for all unique roots in the tree using the specified method
-
-    By default, tree_paths are used. Given a table of all paths in a random forest, this function generates a dictionary of all possible sub paths between each root gene and the target gene at the leaf. The key is the name of the gene on the root of the path (source) and value is the list of sub paths in the table from the root to the leaf excluding the root and the leaf. 
+    Generates context sets for the given genes (or all root genes by default).
 
     Args:
-        data: Input data in format appropriate for the method: tree_paths: DataFrame with 'source' and 'node*' columns. 
-        method: One of 'tree_paths', 'tree' (default: 'tree_paths')
+        data: Input data in format appropriate for the method: tree_paths: DataFrame with 'source' and 'node*' columns.
+        method: One of 'tree_paths' (default: 'tree_paths')
+        genes: Optional list of gene names to build context for, regardless of their
+               position in the path (root or intermediate node). Defaults to all root genes.
         **kwargs: Method-specific arguments
 
     Returns:
-        dict: {source_gene: [list of subpaths]}
+        dict: {gene: [list of subpaths]}
 
     Raises:
         CoRegTorError: If method is unknown
@@ -105,65 +93,49 @@ def create_context(
     if method not in CONTEXT_SET_METHODS:
         raise CoRegTorError(
             f"Unknown method: {method}. Choose from {list(CONTEXT_SET_METHODS.keys())} ")
-
+    # print(len(genes))
     generator = CONTEXT_SET_METHODS[method]
-    return generator(data, **kwargs)
+    return generator(data, genes=genes, **kwargs)
 
 # ------------------
 # Transform context
 # ------------------
 
-
-def _transform_to_gene_frequency(context_set: dict, **kwargs) -> pd.DataFrame:
-    """
-    Transform context set into gene frequency histograms.
-
-    Creates a histogram counting the occurrence of each unique gene across all 
-    sub-paths for each source (root gene).
-
-    Args:
-        context_set: Dictionary with structure {source: [[gene1, gene2, ...], ...]}
-        **kwargs: Optional parameters
-            - normalize (bool): If True, normalize frequencies to proportions (default: False)
-            - min_frequency (int): Minimum frequency threshold to include gene (default: 1)
-
-    Returns:
-        pd.DataFrame: Rows are sources, columns are genes, values are frequencies/proportions. The name of root genes is the index.
-
-    """
+def _transform_to_gene_frequency(context_set: dict,normalize_row=True, normalize_col=False,**kwargs) -> pd.DataFrame:
     min_frequency = kwargs.get('min_frequency', 1)
 
-    # Collect gene frequencies for each source
     freq_data = {}
-
     for source, paths in context_set.items():
-        # Flatten all paths for this source into single list
-        all_genes = []
-        for path in paths:
-            all_genes.extend(path)
-
-        # Count frequencies
+        all_genes = [g for path in paths for g in path]
         gene_counts = Counter(all_genes)
+        freq_data[source] = dict(gene_counts)
 
-        # Apply minimum frequency filter
-        if min_frequency > 1:
-            gene_counts = {gene: count for gene, count in gene_counts.items()
-                           if count >= min_frequency}
+    df = pd.DataFrame.from_dict(freq_data, orient='index').fillna(0)
 
-        freq_data[source] = gene_counts
+    if min_frequency > 1:
+        df = df.where(df >= min_frequency, 0)
 
-    # Convert to DataFrame
-    # Transpose so sources are rows, genes are columns
-    df = pd.DataFrame(freq_data).T
-    df = df.fillna(0).astype(int)  # Fill missing values with 0
+    # column normalization (IDF-style) must happen BEFORE row normalization,
+    # otherwise row proportions get distorted by the column reweighting
+    if normalize_col:
+        n_sources = df.shape[0]
+        doc_freq = (df > 0).sum(axis=0)
+        idf = np.log(n_sources / doc_freq.replace(0, np.nan)).fillna(0)
+        df = df.mul(idf, axis=1)
 
-    # Store metadata about transformation type
+    if normalize_row:
+        row_sums = df.sum(axis=1)
+        df = df.div(row_sums, axis=0).fillna(0)
+    else:
+        if not normalize_col:
+            df = df.astype(int)  # only safe to cast to int if nothing was reweighted
+
     df.attrs['transformation_type'] = 'gene_frequency'
-
+    df.attrs['normalize_row'] = normalize_row
+    df.attrs['normalize_col'] = normalize_col
     return df
 
-
-CONTEXT_TRANSFORMS: Dict[str, Callable] = {
+CONTEXT_TRANSFORMS = {
     "gene_frequency": _transform_to_gene_frequency,
 }
 
@@ -171,6 +143,7 @@ CONTEXT_TRANSFORMS: Dict[str, Callable] = {
 def transform_context(
     context_set: dict,
     method: str = "gene_frequency",
+
     **kwargs
 ) -> pd.DataFrame:
     """

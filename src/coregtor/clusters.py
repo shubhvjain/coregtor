@@ -17,7 +17,7 @@ from sklearn.manifold import MDS
 from sklearn.metrics import silhouette_samples, calinski_harabasz_score, davies_bouldin_score
 import igraph as ig
 from sklearn.cluster import HDBSCAN
-from coregtor.utils.error import CoRegTorError
+from coregtor.util import CoRegTorError
 
 # --- UTILITIES ---
 
@@ -151,7 +151,7 @@ def dist_to_net(dist_df, options={}):
     # 3. EDGE SELECTION: Use a dict to ensure edges are strictly unique and undirected
     # Format: {(smaller_idx, larger_idx): weight}
     edge_dict = {}
-    method = options.get('edge_creation_method', 'edge_threshold_percentile')
+    method = options.get('edge_creation_method', 'threshold_percentile')
     val = options.get('edge_creation_value', 0.5)
 
     if method == 'threshold_percentile':
@@ -209,7 +209,7 @@ def community_detection_leiden(dist_matrix, target_gene, options=None):
         }
     # print(options)
     g = dist_to_net(dist_matrix, options)
-
+    # print(g)
     # LEIDEN
     partition = g.community_leiden(
         resolution=options.get("resolution", 1.0),
@@ -221,6 +221,7 @@ def community_detection_leiden(dist_matrix, target_gene, options=None):
 
     # Generate a metadata string for the result DataFrame
     note = f"leiden"
+    # print(cluster_set)
     return cluster_set, note
 
 
@@ -332,7 +333,7 @@ def silhouette_score(distance_matrix, target_gene, clusters):
     })
 
 
-def generate_cluster_results(distance_matrix, target_gene, clusters, note, cluster_note=""):
+def generate_cluster_results(distance_matrix, target_gene, clusters, note, cluster_note="",feature_importance=None):
     if not clusters:
         return pd.DataFrame()
 
@@ -360,6 +361,12 @@ def generate_cluster_results(distance_matrix, target_gene, clusters, note, clust
         ordered_genes = gene_scores["gene"].tolist()
         n_genes = len(ordered_genes)
 
+        if feature_importance:
+            fi_values = [feature_importance[g] for g in ordered_genes if g in feature_importance]
+            fi_score = round(float(np.mean(fi_values)), 5) if fi_values else np.nan
+        else:
+            fi_score = np.nan
+
         # --- Calculate Internal Metrics ---
         if n_genes >= 2:
             # Extract the compact sub-matrix containing only this cluster's genes
@@ -385,8 +392,9 @@ def generate_cluster_results(distance_matrix, target_gene, clusters, note, clust
             "sources": ";".join(str(g) for g in ordered_genes),
             "n_source": n_genes,
             "silhouette_score": mean_score,
-            "cluster_density": cluster_density,
-            "cluster_diameter": cluster_diameter,
+            #"cluster_density": cluster_density,
+            #"cluster_diameter": cluster_diameter,
+            "fi_score": fi_score,
             "note": note,
             "cluster_note": cluster_note
         })
@@ -428,9 +436,10 @@ def normalize_distance_matrix(distance_matrix):
 def identify_coregulators(
     distance_matrix,
     target_gene,
-    method="hierarchical",
-    options={},
-    note=""
+    method="community_detection",
+    options=None,
+    note="",
+    feature_importance = None
 ):
     """Identify co-regulatory modules from gene distance matrix.
 
@@ -449,6 +458,10 @@ def identify_coregulators(
         - methodology: Complete parameter string
         - validation_scores: Validation scores dict (validation_index only)
     """
+    if options is None:
+        options = {"edge_creation_method": "threshold_percentile",
+                           "edge_creation_value": 0.5, "resolution": 0.25}
+
     if method not in METHOD_REGISTRY:
         available = list(METHOD_REGISTRY.keys())
         raise CoRegTorError(
@@ -464,6 +477,6 @@ def identify_coregulators(
     # print(clusters)
     # print("=====")
     results = generate_cluster_results(
-        distance_matrix, target_gene, clusters, note, cluster_note)
+        distance_matrix, target_gene, clusters, note, cluster_note,feature_importance)
     # print(results)
     return results

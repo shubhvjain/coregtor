@@ -10,15 +10,10 @@ It includes:
 
 import pandas as pd
 import numpy as np
-from collections import Counter, defaultdict
 from sklearn.tree import _tree
 from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor
-from typing import List, Dict, Any,Union, Optional
-from pathlib import Path
-from coregtor.utils.error import CoRegTorError
-
-# Type aliases for better readability
-PathLike = Union[str, Path]
+from typing import List, Dict, Any
+from coregtor.util import CoRegTorError
 
 def create_model_input(raw_ge_data: pd.DataFrame,target_gene:str,t_factors: list = None) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
@@ -44,6 +39,11 @@ def create_model_input(raw_ge_data: pd.DataFrame,target_gene:str,t_factors: list
     # Check if target_gene is in raw_ge_data columns
     if target_gene not in raw_ge_data.columns:
         raise CoRegTorError(f"Target gene '{target_gene}' not found in gene expression data columns.","validation")
+    
+    # Drop duplicate gene columns, keeping the first occurrence
+    if raw_ge_data.columns.duplicated().any():
+        # print("dup found")
+        raw_ge_data = raw_ge_data.loc[:, ~raw_ge_data.columns.duplicated(keep="first")]
     
     # Extract the target vector Y
     Y = raw_ge_data[[target_gene]]
@@ -83,7 +83,40 @@ def _expression_pre_checks(X,Y, min_threshold=0.10):
         raise CoRegTorError(f"Only {non_zeros}/{total} ({pct_nonzero:.1%}) non-zeros. Need ≥{min_required}.","validation")
         
 
-def create_model(X,Y,method="rf",options={"max_depth":5,"n_estimators":1000},sparsity_threshold = 0.10):
+
+def _extract_feature_importance(ensemble_model, X_data):
+    """
+    Extract feature importance scores from a trained ensemble model.
+
+    The feature names are taken from the supplied gene expression dataframe,
+    so the dataframe must contain the same feature columns used during training.
+
+    Args:
+        ensemble_model: Trained sklearn ensemble model with ``feature_importances_``.
+        X_data (pd.DataFrame): Input dataframe used for the feature names.
+
+    Returns:
+        dict: Ordered mapping of ``gene -> importance`` sorted from highest to lowest importance.
+    """
+    if X_data.empty:
+        raise CoRegTorError("The gene expression data (gene_expression_data) is empty.", "validation")
+
+    if not hasattr(ensemble_model, "feature_importances_"):
+        raise CoRegTorError("The supplied model does not expose feature importance scores.", "validation")
+
+    feature_names = list(X_data.columns)
+    importance_scores = np.asarray(ensemble_model.feature_importances_)
+
+    if len(feature_names) != len(importance_scores):
+        raise CoRegTorError(
+            "The number of feature columns does not match the model's feature importance vector.",
+            "validation",
+        )
+
+    importance_pairs = sorted(zip(feature_names, importance_scores), key=lambda item: item[1], reverse=True)
+    return {gene: float(score) for gene, score in importance_pairs}
+
+def create_model(X,Y,method="rf",options=None,sparsity_threshold = 0.10):
     """
     Train an ensemble regression model to predict the expression of the target gene Y using the expression values of other genes in the gene expression data X.
 
@@ -98,6 +131,8 @@ def create_model(X,Y,method="rf",options={"max_depth":5,"n_estimators":1000},spa
     Returns:
        Trained sklearn ensemble model
     """
+    if options is None:
+        options = {"max_depth": 5, "n_estimators": 1000, "n_jobs": -1}
 
     # per check #1 if Y all Y values are 0, skip model 
     _expression_pre_checks(X,Y,sparsity_threshold)
@@ -112,10 +147,11 @@ def create_model(X,Y,method="rf",options={"max_depth":5,"n_estimators":1000},spa
     # Train the model and measure time
     ensemble.fit(X, Y.values.ravel())
     #ensemble.fit(X.values, Y.values.ravel())
-    return ensemble
+    importance = _extract_feature_importance(ensemble,X)
+    return ensemble,importance
 
 
-def tree_paths(model,X,Y) -> pd.DataFrame:
+def tree_paths(model,X,Y):
     """
     Extract all root-to-leaf decision paths from a trained ensemble model.
     
@@ -141,7 +177,7 @@ def tree_paths(model,X,Y) -> pd.DataFrame:
     return paths_df
 
 
-def extract_paths_from_tree(tree, feature_names: List[str], target_col: str) -> List[Dict[str, Any]]:
+def extract_paths_from_tree(tree, feature_names, target_col):
     """
     Extract all root-to-leaf paths from a single decision tree.
     
@@ -224,7 +260,7 @@ def extract_paths_from_tree(tree, feature_names: List[str], target_col: str) -> 
     return path_list
 
 
-def extract_paths_from_forest(ensemble_model, feature_names: List[str], target_col: str = "target") -> pd.DataFrame:
+def extract_paths_from_forest(ensemble_model, feature_names, target_col = "target"):
     """
     Extract and consolidate all paths from an ensemble of decision trees.
     

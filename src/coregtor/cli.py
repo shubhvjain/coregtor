@@ -5,8 +5,7 @@ import argparse
 from pathlib import Path
 import sys
 import os
-from coregtor.pipeline import CoRegTorPipeline
-from coregtor.utils.exp import read_GE_data
+from coregtor.workflow.pipeline import CoRegTorPipeline
 import subprocess
 import sys
 import argparse

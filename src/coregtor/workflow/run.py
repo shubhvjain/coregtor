@@ -5,7 +5,7 @@ import time
 
 from coregtor.workflow.util import read_dataset,get_tflist, get_exp_path
 
-from coregtor.pipeline import CoRegTorPipeline
+from coregtor.workflow.pipeline import CoRegTorPipeline
 
 def run_batch(exp, config, items=100, batch_id=None):
     """
