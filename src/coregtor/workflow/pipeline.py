@@ -1,110 +1,80 @@
-import json
-import gzip
-import time
 import joblib
 import jsonschema
 import pandas as pd
 import traceback
 from pathlib import Path
-from typing import Dict, Any, List
-import hashlib
 import os
+from joblib import Parallel, delayed
+import copy
 
-from coregtor.forest import create_model, tree_paths
-from coregtor.context import create_context, transform_context, compare_context, get_distance_measures_list
-from coregtor.util import CoRegTorError
+from coregtor.context import create_context, transform_context, compare_context
 
 from coregtor.clusters import identify_coregulators, get_cluster_method_list
-
-from joblib import Parallel, delayed, cpu_count
-
-# keys that affect computation — used for checkpoint hash
-COMPUTE_KEYS = ["create_model", "tree_paths",
-                "create_context", "transform_context", "compare_context"]
+from coregtor.context import get_distance_measures_list
+from coregtor import generate_context
 
 SCHEMA = {
     "type": "object",
     "properties": {
-        "target_genes": {
-            "type": "array",
-            "items": {"type": "string"}
+        "id": {"type": "string"},
+        "inputs": {
+            "type": "object",
+            "properties": {
+                "data": {"type": "string"},
+                "source": {"type": "string"},
+                "target_list": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                },
+                "target_file": {"type": "string"}
+            },
+            "required": ["data", "source"]
         },
         "ensemble_model": {
             "type": "object",
             "properties": {
                 "method": {"type": "string", "enum": ["rf", "et"], "default": "rf"},
-                "options": {"type": "object", "default": {"max_depth": 5, "n_estimators": 1000}}
-            }
+                "options": {"type": "object", "default": {"max_depth": 5, "n_estimators": 1000, "n_jobs": -1}}
+            },
+            "default": {"method": "rf", "options": {"max_depth": 5, "n_estimators": 1000, "n_jobs": -1}}
         },
-        "tree_paths": {"type": "object", "default": {}, "description": "Options related to generation of root to leaf tree paths. No options required at the moment"},
         "context_generation": {
-            "description": "To describe the method to generate the context for unique root nodes",
             "type": "object",
             "properties": {
-                "method": {
-                    "type": "string", "default": "tree_paths"
-                },
-                "output": {
-                    "type": "string", "default": "gene_frequency"
-                }
+                "method": {"type": "string", "default": "tree_paths"},
+                "transform": {"type": "string", "default": "gene_frequency"}
             },
-            "default": {"method": "tree_paths", "output": "gene_frequency"}
+            "default": {"method": "tree_paths", "transform": "gene_frequency"}
         },
-        "context_comparison": {
-            "description": "Distance measures to use. ",
-            "type": "object",
-            "properties": {
-                "methods": {
-                    "type": "array",
-                    "uniqueItems": True,
-                    "minItems": 1,
-                    "items": {
-                        "type": "string",
-                        "enum": get_distance_measures_list()
-                    }
-                },
-            },
-            "default": ["cosine_distance"],
-            "additionalProperties": True
-        },
-        "clustering": {
+        "results": {
             "type": "array",
             "items": {
                 "type": "object",
                 "required": ["id", "distance", "method"],
                 "properties": {
-                    "id": {"type": "string", "default": "default"},
-                    "distance": {"type": "string", "default": "cosine_distance"},
+                    "id": {"type": "string"},
+                    "distance": {
+                        "type": "string",
+                        "enum": get_distance_measures_list(),
+                        "default": "cosine_distance"
+                    },
                     "method": {
                         "type": "string",
                         "enum": get_cluster_method_list(),
                         "default": "hierarchical"
                     },
-                    "options": {"type": "object", "default": {"auto_threshold": "inconsistency"}}
+                    "options": {"type": "object", "default": {}}
                 },
                 "additionalProperties": True
-            }
-        },
-        "run": {
-            "description": "These options handle the running of pipeline",
-            "type": "object",
-            "properties": {
-                "checkpointing": {"type": "boolean", "default": True},
-                "save_model": {"type": "boolean", "default": False, "description": ""},
-                "save_tree_paths": {"type": "boolean", "default": False},
-                "rerun": {"type": "boolean", "default": False},
-                "temp_path": {"type": "string", "default": ""},
-                "output_path": {"type": "string", "default": ""},
-                "create_folder": {"type": "boolean", "default": False, "description": "If true, a new folder will be created inside the temp and output path with the provided exp_title "}
             },
-            "additionalProperties": True
+            "default":[{"id":"default","distance":"chebyshev_distance","method":"community_detection"}]
         }
-    }
+    },
+    "required": ["id", "inputs"]
 }
 
 
 def apply_defaults(data, schema):
-    """Recursively apply default values from schema to data where keys are missing."""
     if not isinstance(schema, dict):
         return data
 
@@ -125,379 +95,262 @@ def apply_defaults(data, schema):
         if not isinstance(data, list):
             return data
         item_schema = schema.get("items", {})
-        if not isinstance(data, list):
-            return data
-        # apply defaults to each existing item, but do NOT add default items to the array
         data = [apply_defaults(item, item_schema) for item in data]
-        # if the array itself has a top-level default and is empty, leave it — caller decides
 
     return data
 
 
 def get_validated_options(options):
-    # 1. validate structure first
     jsonschema.validate(instance=options, schema=SCHEMA)
 
-    # 2. check unique cluster ids
-    cluster_ids = [c["id"] for c in options.get("clustering", []) if "id" in c]
-    if len(cluster_ids) != len(set(cluster_ids)):
-        duplicates = {id for id in cluster_ids if cluster_ids.count(id) > 1}
+    result_ids = [r["id"] for r in options.get("results", []) if "id" in r]
+    if len(result_ids) != len(set(result_ids)):
+        duplicates = {rid for rid in result_ids if result_ids.count(rid) > 1}
         raise jsonschema.ValidationError(
-            f"Duplicate cluster ids found: {duplicates}")
+            f"Duplicate result ids found: {duplicates}")
 
-    # 3. fill in missing defaults
-    import copy
     result = copy.deepcopy(options)
     apply_defaults(result, SCHEMA)
-
     return result
 
+def read_gene_list(path):
+    """Read one gene name per line, ignoring blank lines."""
+    with open(path) as f:
+        return [line.strip() for line in f if line.strip()]
 
-def get_default_options():
-    result = {}
-    apply_defaults(result, SCHEMA)
-    return result
+
+def load_inputs(config):
+    """Return (expression_data, source_genes, targets) from a validated config."""
+    inputs = config["inputs"]
+    expression_data = pd.read_csv(inputs["data"], index_col=0)
+    source_genes = read_gene_list(inputs["source"])
+
+    if inputs.get("target_list"):
+        targets = inputs["target_list"]
+    elif inputs.get("target_file"):
+        targets = read_gene_list(inputs["target_file"])
+    else:
+        raise ValueError("Provide either target_list or target_file in inputs")
+
+    targets = list(dict.fromkeys(targets))  # drop duplicates, keep order
+    return expression_data, source_genes, targets
 
 
-class CoRegTorPipeline:
-    def __init__(self, expression_data, source_genes, options, exp_title=None):
+def make_folder(base, exp_id):
+    """Create and return <base>/<exp_id>. `base` may contain ~ or $VARS."""
+    folder = Path(os.path.expandvars(base)).expanduser() / exp_id
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
 
-        if expression_data is None:
-            raise ValueError("no expression data provided")
-        if not source_genes:
-            raise ValueError("provide a list of source genes to use a input")
 
-        self.expression_data = expression_data
-        self.source_genes = source_genes
+def find_result_config(config, result_id):
+    """Return the entry of config["results"] with this id."""
+    for r in config["results"]:
+        if r["id"] == result_id:
+            return r
+    raise ValueError(f"Result configuration with id '{result_id}' not found.")
 
-        # defaults = CoRegTorPipeline._generate_default_config_dict()
-        # options = {**defaults, **(options or {})}
-        # jsonschema.validate(instance=options, schema=SCHEMA)
-        self.options = get_validated_options(options)
-        # print(self.options)
-        self.results = {}
-        self.stats = {}
-        self.status = {}
 
-        self.title = exp_title.replace(
-            " ", "_") if exp_title else f"exp_{int(time.time())}"
+def sources_for(source_genes, target):
+    """Source genes usable for this target (a gene is not its own regulator)."""
+    return [g for g in source_genes if g != target]
 
-        # create a folder in  temp locations if required
-        temp_path = self.options["run"]["temp_path"]
-        if self.options["run"]["create_folder"]:
-            temp_path = f"{temp_path}/{self.title}"
 
-        self.checkpoint_dir = Path(temp_path)
-        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-        out_path = self.options["run"]["output_path"]
-        if self.options["run"]["create_folder"]:
-            out_path = f"{temp_path}/{self.title}"
+class CoRegTorBulkPipeline:
+    """Run the CoRegTor workflow for a batch of target genes.
 
-        self.output_dir = Path(out_path)
+    The pipeline follows a simple end-to-end workflow:
 
-        # self.targets = targets  # List of targets to process
+    1. Validate the user configuration against the project schema.
+    2. Load the expression matrix and the source-gene list from the input files.
+    3. For each target gene, build a model using the configured ensemble method.
+    4. Extract decision paths from the trained model.
+    5. Generate context sets from those paths and transform them into a gene-frequency matrix.
+    6. Compare gene contexts using the configured distance metric.
+    7. Cluster genes into co-regulator groups with the selected clustering method.
+    8. Save intermediate checkpoints to a temp directory and write final cluster CSV files to an output directory.
 
-        self.X_shared = None
-        self.feature_columns = None
-        self._prepare_shared_X()
+    Parameters
+    ----------
+    config_dict : dict
+        Configuration for the full experiment. This must match the schema defined in ``SCHEMA``. The required top-level keys are:
 
-    def _prepare_shared_X(self):
-        self.feature_columns = [
-            g for g in self.source_genes if g in self.expression_data.columns]
-        if not self.feature_columns:
-            raise ValueError("no valid feature columns found")
-        self.X_shared = self.expression_data[self.feature_columns]
+        - ``id``: experiment identifier
+        - ``inputs``: input paths with ``data`` and ``source`` required; either ``target_list`` or ``target_file`` must also be supplied
+        - ``ensemble_model``: optional ensemble settings
+        - ``context_generation``: optional context-building settings; 
+        - ``results``: list of result definitions, where each item must include ``id``, ``distance``, and ``method``
 
-    def _get_model_input(self, target):
-        if target not in self.expression_data.columns:
-            raise ValueError(f"target '{target}' not in expression data")
-        Y = self.expression_data[[target]]
-        if target in self.feature_columns:
-            X_cols = [col for col in self.feature_columns if col != target]
-            X = self.X_shared[X_cols]
-        else:
-            X = self.X_shared
-        return X, Y
+    run_config : dict, optional
+        Runtime settings for file handling and execution behavior. The class reads
+        these keys if present:
 
-    def _checkpoint_file(self, target: str) -> Path:
-        return self.checkpoint_dir / f"{target}.pkl"
+        - ``temp_path``: base folder for temporary checkpoints; default is ``./temp``
+        - ``output_path``: base folder for generated CSV outputs; default is ``./output``
+        - ``rerun``: if True, regenerate temporary checkpoints even when they exist and overwrite existing result CSV files
+        - ``n_jobs``: number of parallel jobs used when generating result CSVs
+ 
+    """
 
-    def _checkpoint_exists(self, target: str) -> bool:
-        if not self.options.get("checkpointing", True) or self.options.get("force_fresh", False):
-            return False
-        f = self._checkpoint_file(target)
-        if not f.exists():
-            return False
-        else:
+    def __init__(self, config_dict, run_config=None):
+        self.config = get_validated_options(config_dict)
+        self.run_config = run_config or {}
+        self.exp_id = self.config["id"]
+
+        self.temp_dir = make_folder(self.run_config.get("temp_path", "./temp"), self.exp_id)
+        self.output_dir = make_folder(self.run_config.get("output_path", "./output"), self.exp_id)
+
+        self.expression_data, self.source_genes, self.targets = load_inputs(self.config)
+
+        if not any(g in self.expression_data.columns for g in self.source_genes):
+            raise ValueError("No valid feature columns found in expression data")
+
+    def _checkpoint_file(self, target):
+        return self.temp_dir / f"{target}.pkl"
+
+    def process_single_target_temp(self, target):
+        """Train the model for one target and save its checkpoint.
+
+        Returns True if a valid checkpoint exists afterwards, False if the
+        target failed. A failed target leaves no checkpoint, so it is retried
+        on the next run.
+        """
+        ckpt = self._checkpoint_file(target)
+        if ckpt.exists() and not self.run_config.get("rerun", False):
             return True
 
-    def _save_checkpoint(self, target: str):
+        model_cfg = self.config["ensemble_model"]
+        try:
+            model, fi, paths, transformed, time_taken = generate_context(
+                ge_data=self.expression_data,
+                source_gene=sources_for(self.source_genes, target),
+                target_gene=target,
+                ensemble_method=model_cfg["method"],
+                ensemble_options=copy.deepcopy(model_cfg["options"]),
+            )
+        except Exception:
+            print(traceback.format_exc())
+            ckpt.unlink(missing_ok=True)  # remove an old checkpoint when rerunning
+            return False
+
         checkpoint = {
-            "timestamp": time.time(),
-            "results": self.results[target],
-            "stats": self.stats[target],
-            "success": self.status[target]
+            "success": True,
+            "model": model,
+            "feature_importance": fi,
+            "paths": paths,
+            "transformed_context": transformed,
+            "time_taken": time_taken,
         }
-        joblib.dump(checkpoint, self._checkpoint_file(target), compress=3)
-        self.results[target] = None
-        self.stats[target] = None
-        self.status[target] = None
+        joblib.dump(checkpoint, ckpt, compress=3)
+        return True
 
-    def run_single_target(self, target, rerun=False):
-        """Run pipeline for one gene. Raises on failure."""
-        if self._checkpoint_exists(target) and not rerun:
-            return
-
-        # Total available CPUs (including logical cores)
-        #print(cpu_count()) 
-        # Total physical cores
-        #print(cpu_count(only_physical_cores=True)) 
-
-        stats = {"timing": {}, "quality": {}, "n_cores":cpu_count()}
-        results = {}
-        status = {"success": False, "error": ""}
-
-        save_model = self.options["run"].get("save_model", False)
-        save_paths = self.options["run"].get("save_tree_paths", False)
-
-        try:
-            if target not in self.expression_data.columns:
-                raise ValueError(f"target '{target}' not in expression data")
-
-            t = time.perf_counter()
-            X, Y = self._get_model_input(target)
-            stats["timing"]["model_input"] = time.perf_counter() - t
-
-            t = time.perf_counter()
-            model = create_model(X, Y, **self.options.get("ensemble_model"))
-            stats["timing"]["model_train"] = time.perf_counter() - t
-            if save_model:
-                results["model"] = model
-
-            t = time.perf_counter()
-            paths = tree_paths(model, X, Y, **self.options.get("tree_paths"))
-            stats["timing"]["paths_extract"] = time.perf_counter() - t
-            stats["quality"]["n_paths"] = len(paths)
-            stats["quality"]["n_unique_roots"] = paths["source"].nunique()
-            if save_paths:
-                results["paths"] = paths
-
-            context_options = self.options.get("context_generation")
-
-            t = time.perf_counter()
-            contexts = create_context(
-                paths, method=context_options.get("method"))
-
-            transformed = transform_context(
-                contexts, method=context_options.get("output"))
-
-            stats["timing"]["context_create"] = time.perf_counter() - t
-            stats["quality"]["n_contexts"] = len(contexts)
-
-            results["context"] = contexts
-            results["gene_frequency"] = transformed
-
-            comparison_results = {}
-
-            comparison_methods = self.options.get(
-                "context_comparison").get("methods")
-
-            for m in comparison_methods:
-                matrix = compare_context(
-                    transformed, method=m, transformation_type="gene_frequency")
-                comparison_results[m] = matrix
-
-            results["distance"] = comparison_results
-
-            # clustering results
-            cluster_results = {}
-            cluster_options = self.options.get("clustering")
-            for c in cluster_options:
-                id = c["id"]
-                dist_matrix = comparison_results[c["distance"]]
-                c_method = c["method"]
-                c_options = c["options"]
-                c_notes = c["note"]
-                res = identify_coregulators(
-                    dist_matrix, target, c_method, c_options, c_notes)
-                cluster_results[id] = res
-
-            results["clusters"] = cluster_results
-
-            stats["timing"]["total"] = sum(stats["timing"].values())
-            status["success"] = True
-            self.results[target] = results
-            self.stats[target] = stats
-            self.status[target] = status
-
-            if self.options.get("checkpointing", True):
-                self._save_checkpoint(target)
-
-        except CoRegTorError as e:
-            status["success"] = False
-            status["error"] = str(e)
-            self.results[target] = None
-            self.stats[target] = None
-            self.status[target] = status
-            if self.options.get("checkpointing", True):
-                self._save_checkpoint(target)
-            raise
-
-    def generate_all_clusters(self, targets, cluster_id="default"):
-        """
-        """
-        
-
-
-class PipelineResults:
-    def __init__(self, options: Dict[str, Any], tflist: list, exp_title: str = None, targets: List[str] = None):
-        self.tflist = tflist
-        jsonschema.validate(instance=options, schema=SCHEMA)
-        self.options = options
-        self.title = exp_title
-        self.checkpoint_dir = Path(
-            os.path.expandvars(self.options["paths"]["temp"]))
-        self.output_dir = Path(os.path.expandvars(
-            self.options["paths"]["output"]))
-        self.targets = targets  # List of targets to process
-
-    def get_successful_targets(self) -> List[str]:
-        """Get list of targets to process.
-
-        If targets were explicitly provided, use those.
-        Otherwise, scan checkpoint directory for pkl files.
-        """
-        if self.targets is not None:
-            # Filter to only include targets that have pkl files
-            available = {f.stem for f in self.checkpoint_dir.glob("*.pkl")}
-            filtered = [t for t in self.targets if t in available]
-            if len(filtered) != len(self.targets):
-                missing = set(self.targets) - available
-                print(
-                    f"Warning: {len(missing)} targets missing pkl files: {list(missing)[:5]}...")
-            return filtered
-        else:
-            # Fallback: scan directory for pkl files
-            return [f.stem for f in self.checkpoint_dir.glob("*.pkl")]
-
-    def generate_clusters_file(self):
-        targets = self.get_successful_targets()
-        n_jobs = self.options.get("result_generation", {}).get("n_jobs", 4)
-        rerun_files = self.options.get(
-            "result_generation", {}).get("rerun", False)
-        print(f"processing {len(targets)} targets with {n_jobs} workers")
-
-        methods_set = self.options.get("clustering", [])
-        if len(methods_set) == 0:
-            raise ValueError("No clustering method specified")
-
-        for m in methods_set:
-            # check if already created
-
-            method_id = m["id"]
-            print(f"Processing {method_id}")
-            out = self.output_dir / f"result_{method_id}.csv"
-            if out.exists() and not rerun_files:
-                print("Result file already exists")
-                continue
-            all_results = Parallel(n_jobs=n_jobs, verbose=0)(
-                delayed(self._process_single_target)(target, m)
-                for target in targets
-            )
-
-            valid_results = [r for r in all_results if r is not None]
-            print(f"Valid results: {len(valid_results)} / {len(all_results)}")
-
-            # Extract best clusters
-            all_best_results = [
-                r["best_cluster"]
-                for r in valid_results
-                if r["best_cluster"] is not None
-            ]
-
-            # Save best clusters
-            combined = pd.DataFrame(all_best_results)
-            combined.to_csv(out, index=False)
-            print(f"Saved {len(combined)} rows to {out}")
-
-            # Save similarity matrices
-            save_sim = self.options.get("save_similarity_matrix", False)
-            if save_sim:
-                sim_out = self.output_dir / f"sim_{method_id}.json.gz"
-                if not sim_out.exists():
-                    sims = {
-                        item["target"]: item["sim_matrix"].to_dict(
-                            orient='index')
-                        for item in valid_results
-                        if item["sim_matrix"] is not None
-                    }
-                    with gzip.open(sim_out, 'wt') as f:
-                        json.dump(sims, f, indent=0)
-
-            # Save all clusters
-            save_all_clusters = self.options.get("save_all_clusters", False)
-            if save_all_clusters:
-                all_clusters_list = [
-                    item["all_clusters"]
-                    for item in valid_results
-                    if item["all_clusters"] is not None and not item["all_clusters"].empty
-                ]
-                if all_clusters_list:
-                    combined_df = pd.concat(
-                        all_clusters_list, ignore_index=True)
-                    out_all_c = self.output_dir / \
-                        f"clusters_{method_id}.parquet"
-                    combined_df.to_parquet(
-                        out_all_c, compression='gzip', index=False)
-
-    def _process_single_target(self, target: str, method_config: str) -> Dict[str, pd.DataFrame]:
-        try:
-            checkpoint_file = self.checkpoint_dir / f"{target}.pkl"
-            if not checkpoint_file.exists():
-                return None
-
-            checkpoint_data = joblib.load(checkpoint_file)
-
-            results = {
-                "all_clusters": None,
-                "best_cluster": None,
-                "sim_matrix": None,
-                "sim_matrix_name": method_config["matrix_id"],
-                "target": target
-            }
-
-            method_id = method_config["id"]
-            sim_matrix = self._get_sim_matrix(
-                checkpoint_data, method_config["matrix_id"])
-            results["sim_matrix"] = sim_matrix
-            if sim_matrix is None:
-                return None
-
-            _, clusters_df, best_cluster = identify_coregulators(
-                sim_matrix,
-                target,
-                method=method_config["method"],
-                method_options=method_config["method_options"]
-            )
-            if clusters_df is None or clusters_df.empty:
-                print(f"No clusters generated for {target}")
-                return None
-
-            clusters_df["note"] = f"{self.title}-coregtor-{method_id}"
-            if best_cluster is not None:
-                best_cluster["note"] = f"{self.title}-coregtor-{method_id}"
-            best_cluster["note"] = f"{self.title}-coregtor-{method_id}"
-            results["all_clusters"] = clusters_df
-            results["best_cluster"] = best_cluster
-            return results
-        except Exception as e:
-            traceback.print_exc()
-            print(f"error processing {target}: {e}")
+    def process_single_target_result(self, target, res_config):
+        ckpt_file = self._checkpoint_file(target)
+        if not ckpt_file.exists():
             return None
 
-    def _get_sim_matrix(self, checkpoint_data: Dict, matrix_id: str):
-        results = checkpoint_data.get(
-            "results", {}).get("comparison_results", [])
-        found = next((d for d in results if d.get("id") == matrix_id), None)
-        return found.get("result") if found else None
+        try:
+            data = joblib.load(ckpt_file)
+            if not data.get("success", False):
+                return None
+
+            ctx_cfg = self.config["context_generation"]
+            sim_matrix = compare_context(
+                data["transformed_context"],
+                method=res_config["distance"],
+                transformation_type=ctx_cfg["transform"],
+            )
+            clusters_df = identify_coregulators(
+                distance_matrix=sim_matrix,
+                target_gene=target,
+                method=res_config["method"],
+                options=res_config.get("options", {}),
+                feature_importance=data["feature_importance"],
+            )
+            if clusters_df is None or clusters_df.empty:
+                return None
+
+            # clusters_df["note"] = f"{self.exp_id}-coregtor-{res_config['id']}"
+            return clusters_df
+        except Exception:
+            return None
+
+    def generate_temp_files(self):
+        """Helper to run temp generation for all targets sequentially."""
+        for target in self.targets:
+            self.process_single_target_temp(target)
+
+    def generate_results(self, result_id=None):
+        """Build the result CSV(s) from the checkpoints, one target per parallel job."""
+        n_jobs = self.run_config.get("n_jobs", -1)
+        rerun = self.run_config.get("rerun", False)
+
+        if result_id is None:
+            configs_to_run = self.config["results"]
+        else:
+            configs_to_run = [find_result_config(self.config, result_id)]
+
+        available = {f.stem for f in self.temp_dir.glob("*.pkl")}
+        targets = [t for t in self.targets if t in available]
+
+        for res_config in configs_to_run:
+            out_file = self.output_dir / f"result_{res_config['id']}.csv"
+            if out_file.exists() and not rerun:
+                continue
+
+            all_results = Parallel(n_jobs=n_jobs)(
+                delayed(self.process_single_target_result)(target, res_config)
+                for target in targets
+            )
+            tables = [df for df in all_results if df is not None and not df.empty]
+
+            if tables:
+                pd.concat(tables, ignore_index=True).to_csv(out_file, index=False)
+
+
+
+class CoRegTorRunPipeline:
+    """Direct run: no temp files, only the final result CSV is written.
+
+    Each target goes through RunCoRegTor and only its small cluster table is kept.
+    """
+
+    def __init__(self, config_dict, run_config=None):
+        self.config = get_validated_options(config_dict)
+        self.run_config = run_config or {}
+        self.exp_id = self.config["id"]
+
+        self.output_dir = make_folder(self.run_config.get("output_path", "./output"), self.exp_id)
+        self.expression_data, self.source_genes, self.targets = load_inputs(self.config)
+
+    def get_result_config(self, result_id):
+        return find_result_config(self.config, result_id)
+
+    def result_file(self, result_id):
+        return self.output_dir / f"result_{result_id}.csv"
+
+    def run_target(self, target, res_config):
+        """Co-regulators of one target as a DataFrame, or None if there are none.
+        Errors are raised, the caller decides what to do with them."""
+        from coregtor import RunCoRegTor  # local import avoids a circular import
+
+        model_cfg = self.config["ensemble_model"]
+        results, _ = RunCoRegTor(  # second value (intermediates) is not needed
+            ge_data=self.expression_data,
+            source_gene=sources_for(self.source_genes, target),
+            target_gene=target,
+            ensemble_method=model_cfg["method"],
+            ensemble_options=copy.deepcopy(model_cfg["options"]),
+            distance_measure=res_config["distance"],
+            cluster_method=res_config["method"],
+            cluster_options=copy.deepcopy(res_config.get("options")),
+        )
+        if results is None or results.empty:
+            return None
+        return results
+
+    def save_result(self, result_id, tables):
+        out_file = self.result_file(result_id)
+        pd.concat(tables, ignore_index=True).to_csv(out_file, index=False)
+        return out_file

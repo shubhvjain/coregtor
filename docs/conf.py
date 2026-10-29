@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, os.path.abspath('../src'))
 
 project = 'CoRegTor'
-copyright = '2025, Shubh Vardhan Jain'
+copyright = '2026, Shubh Vardhan Jain'
 author = 'Shubh Vardhan Jain'
 
 # -- General configuration ---------------------------------------------------
@@ -24,6 +24,7 @@ extensions = [
     'sphinx_autodoc_typehints',
     'sphinx.ext.autosummary', 
     'myst_nb',
+    'sphinx_copybutton'
 ]
 
 # MyST-NB configuration

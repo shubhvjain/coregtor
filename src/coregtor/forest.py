@@ -15,73 +15,106 @@ from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor
 from typing import List, Dict, Any
 from coregtor.util import CoRegTorError
 
-def create_model_input(raw_ge_data: pd.DataFrame,target_gene:str,t_factors: list = None) -> tuple[pd.DataFrame, pd.DataFrame]:
+def _expression_pre_checks(X: pd.DataFrame, Y: pd.DataFrame, min_threshold: float = 0.10) -> pd.DataFrame:
     """
-    Prepare gene expression data for training.
+    Validate target gene Y and filter uninformative sparse feature columns in X.
 
-    This function splits the gene expression DataFrame into features (X) and target (Y) for supervised learning.
+    Args:
+        X (pd.DataFrame): Feature expression matrix (samples x TFs).
+        Y (pd.DataFrame): Target gene expression matrix (samples x 1).
+        min_threshold (float): Minimum fraction of non-zero values required per column.
 
-    Additionally, if a list of t_factors is provided, X is filtered to include only Transcription factors. 
+    Returns:
+        pd.DataFrame: Filtered feature matrix X containing only genes that meet the threshold.
+    """
+    total_samples = len(Y)
+    
+    # 1. Validate Target Gene Y (Strict check)
+    y_pct_nonzero = (Y != 0).mean(axis=0)
+    if (y_pct_nonzero < min_threshold).any():
+        failed_col = y_pct_nonzero.idxmin()
+        failed_pct = y_pct_nonzero.min()
+        failed_count = (Y[failed_col] != 0).sum()
+        min_req = total_samples * min_threshold
+        
+        raise CoRegTorError(
+            f"Target gene column '{failed_col}' in Y has only {failed_count}/{total_samples} "
+            f"({failed_pct:.1%}) non-zero samples. Need ≥{min_req:.1f} ({min_threshold:.1%}).",
+            "validation"
+        )
+
+    # 2. Filter Feature Matrix X based on sparsity
+    total_source_genes = X.shape[1]
+    x_pct_nonzero = (X != 0).mean(axis=0)
+    valid_tfs = x_pct_nonzero[x_pct_nonzero >= min_threshold].index
+    num_kept = len(valid_tfs)
+
+    if num_kept == 0:
+        raise CoRegTorError(
+            f"No feature genes in X met the minimum non-zero threshold of {min_threshold:.1%}.",
+            "validation"
+        )
+
+    if num_kept < total_source_genes:
+        print(f"Using {num_kept} out of {total_source_genes} source genes with sparsity ≥ {min_threshold:.1%}")
+
+    return X[valid_tfs]
+
+
+def create_model_input(
+    raw_ge_data: pd.DataFrame, 
+    target_gene: str, 
+    t_factors: list = None, 
+    sparsity_threshold: float = 0.10
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Prepare gene expression data for training by splitting and validating feature and target matrices.
+    
+    This function splits raw gene expression data into features (X) and target (Y), filters features 
+    to transcription factors if provided, drops duplicate columns, and enforces sparsity validation.
     
     Args:
-      raw_ge_data (pd.DataFrame) : Gene expression data in samples x genes format. NO processing done. 
-      target_gene (str) :  Name of the target gene to predict. Must be present in raw_ge_data columns
-      t_factors (list) :  A list of transcription factor gene names. 
+        raw_ge_data (pd.DataFrame): Gene expression data in samples x genes format.
+        target_gene (str): Name of the target gene to predict. Must be present in raw_ge_data columns.
+        t_factors (list, optional): A list of transcription factor gene names.
+        sparsity_threshold (float): Minimum fraction of non-zero expression values required per column.
       
     Returns:
-      tuple[pd.DataFrame, pd.DataFrame] :  X - Feature matrix (samples x genes) excluding target gene; Y - Target vector (samples x 1) containing only target gene expression
-    
+        tuple[pd.DataFrame, pd.DataFrame]: 
+            X - Validated feature matrix (samples x TFs) filtered by sparsity_threshold
+            Y - Validated target matrix (samples x 1)
     """
     # Check if raw_ge_data is empty
     if raw_ge_data.empty:
-        raise CoRegTorError("The gene expression data (raw_ge_data) is empty.","validation")
+        raise CoRegTorError("The gene expression data (raw_ge_data) is empty.", "validation")
 
     # Check if target_gene is in raw_ge_data columns
     if target_gene not in raw_ge_data.columns:
-        raise CoRegTorError(f"Target gene '{target_gene}' not found in gene expression data columns.","validation")
+        raise CoRegTorError(f"Target gene '{target_gene}' not found in gene expression data columns.", "validation")
     
     # Drop duplicate gene columns, keeping the first occurrence
     if raw_ge_data.columns.duplicated().any():
-        # print("dup found")
         raw_ge_data = raw_ge_data.loc[:, ~raw_ge_data.columns.duplicated(keep="first")]
     
-    # Extract the target vector Y
+    # Extract the target matrix Y
     Y = raw_ge_data[[target_gene]]
 
-    # Get feature columns
-    if t_factors is not None and len(t_factors)>0:
+    # Get initial feature columns
+    if t_factors is not None and len(t_factors) > 0:
         X_cols = [gene for gene in t_factors if gene in raw_ge_data.columns and gene != target_gene]
     else:
         # Use all columns except target if no t_factors provided
         X_cols = [col for col in raw_ge_data.columns if col != target_gene]
     
     if not X_cols:
-        raise CoRegTorError("No valid feature columns found after filtering.","validation")
+        raise CoRegTorError("No valid feature columns found after filtering.", "validation")
 
     X = raw_ge_data[X_cols]
+
+    # Perform pre-checks: validates Y and filters sparse columns in X
+    X = _expression_pre_checks(X, Y, min_threshold=sparsity_threshold)
+
     return X, Y
-
-def _expression_pre_checks(X,Y, min_threshold=0.10):  
-    """
-    This method checks if the expression data satisfies certain thresholds to build a reasonable prediction model 
-    
-    Args:
-        X : Input
-        Y : Target
-        min_threshold : The minimum number of rows in the target dataset that should have a non zero values. 0.025 by default i.e. 2.5% of the total rows 
-
-    """
-    target = Y.iloc[:, 0]
-    non_zeros = (target != 0).sum()
-    total = len(target)
-    pct_nonzero = non_zeros / total
-    
-    min_required = int(total * min_threshold)
-    #print(min_required)
-    #print(min_threshold)
-    if non_zeros < min_required:
-        raise CoRegTorError(f"Only {non_zeros}/{total} ({pct_nonzero:.1%}) non-zeros. Need ≥{min_required}.","validation")
-        
 
 
 def _extract_feature_importance(ensemble_model, X_data):
@@ -116,40 +149,45 @@ def _extract_feature_importance(ensemble_model, X_data):
     importance_pairs = sorted(zip(feature_names, importance_scores), key=lambda item: item[1], reverse=True)
     return {gene: float(score) for gene, score in importance_pairs}
 
-def create_model(X,Y,method="rf",options=None,sparsity_threshold = 0.10):
+def create_model(X: pd.DataFrame, Y: pd.DataFrame, method: str = "rf", options: dict = None):
     """
-    Train an ensemble regression model to predict the expression of the target gene Y using the expression values of other genes in the gene expression data X.
+    Train an ensemble regression model to predict the expression of target gene Y using feature genes X.
 
-    Currently 2 ensemble model are supported : `sklearn.ensemble.RandomForestRegressor` and `sklearn.ensemble.ExtraTreesRegressor`
+    Currently supported models:
+    - `RandomForestRegressor <https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestRegressor.html>`_ (`rf`)
+    - `ExtraTreesRegressor <https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.ExtraTreesRegressor.html>`_ (`et`)
 
     Args:
-        X (pd.DataFrame) : Gene expression data (sample by genes). This can be generated using the :py:func:`create_model_input` method
-        Y (pd.DataFrame) : Gene expression data for the target gene. This can be generated using the `create_model_input` method.
-        method (str) : The type of ensemble based model. This must be a valid model in sklearn.ensemble module. Use `rf` (default) for random forest regressor,  `et` for extra trees regressor
-        options (dict,optional) : Dictionary of key value pairs to specify training options. See the scikit-learn model docs for options: `RandomForestRegressor <https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestRegressor.html>`_ or  `ExtraTreesRegressor <https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.ExtraTreesRegressor.html>`_
+        X (pd.DataFrame): Gene expression feature matrix (samples x TFs). Generated via `create_model_input`.
+        Y (pd.DataFrame): Gene expression target matrix (samples x 1). Generated via `create_model_input`.
+        method (str): Type of ensemble model ('rf' or 'et'). Default is 'rf'.
+        options (dict, optional): Hyperparameters for the estimator. Overrides defaults (max_depth=5, n_estimators=1000, n_jobs=-1).
+            See `RandomForestRegressor <https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestRegressor.html>`_ or 
+            `ExtraTreesRegressor <https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.ExtraTreesRegressor.html>`_ for full parameter options.
 
     Returns:
-       Trained sklearn ensemble model
+        tuple: A tuple containing:
+            - ensemble (RegressorMixin): The trained scikit-learn ensemble model.
+            - importance (dict): Feature gene importances ordered from highest to lowest score.
     """
-    if options is None:
-        options = {"max_depth": 5, "n_estimators": 1000, "n_jobs": -1}
-
-    # per check #1 if Y all Y values are 0, skip model 
-    _expression_pre_checks(X,Y,sparsity_threshold)
+    # Safely merge custom options with default parameters
+    default_options = {"max_depth": 5, "n_estimators": 1000, "n_jobs": -1}
+    if options is not None:
+        default_options.update(options)
+    options = default_options
 
     if method == "rf":
         ensemble = RandomForestRegressor(**options)
     elif method == "et":
         ensemble = ExtraTreesRegressor(**options)
     else:
-        raise CoRegTorError(f"Invalid method '{method}'. Must be 'rf' or 'et'","validation") 
+        raise CoRegTorError(f"Invalid method '{method}'. Must be 'rf' or 'et'.", "validation") 
     
-    # Train the model and measure time
+    # Train the model and extract feature importance
     ensemble.fit(X, Y.values.ravel())
-    #ensemble.fit(X.values, Y.values.ravel())
-    importance = _extract_feature_importance(ensemble,X)
-    return ensemble,importance
-
+    importance = _extract_feature_importance(ensemble, X)
+    
+    return ensemble, importance
 
 def tree_paths(model,X,Y):
     """
@@ -177,7 +215,7 @@ def tree_paths(model,X,Y):
     return paths_df
 
 
-def extract_paths_from_tree(tree, feature_names, target_col):
+def _extract_paths_from_tree(tree, feature_names, target_col):
     """
     Extract all root-to-leaf paths from a single decision tree.
     
@@ -299,7 +337,7 @@ def extract_paths_from_forest(ensemble_model, feature_names, target_col = "targe
         tree_structure = estimator.tree_
         
         # Extract paths from this individual tree
-        tree_paths = extract_paths_from_tree(tree_structure, feature_names, target_col)
+        tree_paths = _extract_paths_from_tree(tree_structure, feature_names, target_col)
         
         # Add tree identification to each path
         for path_dict in tree_paths:

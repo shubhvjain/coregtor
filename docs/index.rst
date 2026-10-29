@@ -6,14 +6,11 @@
 CoRegTor documentation
 ======================
 
-This is the documentation for CoRegTor`, which stands for CO-REulators of a Gene predicTOR, a bioinformatics tool to predict transcription co-regulator for a gene from gene expression data using random forest methods.
 
 
 .. toctree::
    :maxdepth: 2
    
-   start
    tutorial1
-   pipeline
-   maths
+   bulk
    api
