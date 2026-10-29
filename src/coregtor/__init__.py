@@ -271,7 +271,8 @@ def PlotClusters(result, details, evidence=None, network_options=None):
 
         for idx, item in enumerate(evidence_for_cluster):
             color = cmap(idx % 20)
-            legend_info.append((f"{item["title"]}({",".join(item['sources'])})", color))
+            sources_str = ",".join(item['sources'])
+            legend_info.append((f"{item['title']}({sources_str})", color))
             for source in item["sources"]:
                 evidence_colors_map[source] = color
 
