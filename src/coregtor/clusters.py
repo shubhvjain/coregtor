@@ -8,13 +8,12 @@ from collections import defaultdict, Counter
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.cm as cm
+# import matplotlib.pyplot as plt
+# import matplotlib.cm as cm
 
 from scipy.cluster.hierarchy import linkage, fcluster, inconsistent
 from scipy.spatial.distance import squareform
-from sklearn.manifold import MDS
-from sklearn.metrics import silhouette_samples, calinski_harabasz_score, davies_bouldin_score
+from sklearn.metrics import silhouette_samples 
 import igraph as ig
 from sklearn.cluster import HDBSCAN
 from coregtor.util import CoRegTorError
@@ -363,7 +362,7 @@ def generate_cluster_results(distance_matrix, target_gene, clusters, note, clust
 
         if feature_importance:
             fi_values = [feature_importance[g] for g in ordered_genes if g in feature_importance]
-            fi_score = round(float(np.mean(fi_values)), 5) if fi_values else np.nan
+            fi_score = round(float(np.sum(fi_values)), 5) if fi_values else np.nan
         else:
             fi_score = np.nan
 
@@ -431,6 +430,78 @@ def normalize_distance_matrix(distance_matrix):
 
     # Reconstruct the DataFrame with original indices/columns
     return pd.DataFrame(norm_mat, index=distance_matrix.index, columns=distance_matrix.columns)
+
+
+def cluster_results_to_edges(cluster_results, feature_importance=None):
+    """
+    Convert cluster summary rows into a DataFrame with one row per source gene.
+
+    This is useful when the output of identify_coregulators needs to be visualised in a network
+
+    Args:
+        cluster_results (pd.DataFrame): Output from identify_coregulators, typically with
+            columns like cluster_uid, target, and sources.
+        feature_importance (dict, optional): Mapping of gene name to feature importance score.
+
+    Returns:
+        pd.DataFrame: DataFrame with columns:
+            - cluster_id
+            - target
+            - source
+            - fi_score
+    """
+    if cluster_results is None or cluster_results.empty:
+        return pd.DataFrame(columns=["cluster_id", "target", "source", "fi_score"])
+
+    cluster_id_col = "cluster_uid" if "cluster_uid" in cluster_results.columns else "cluster_id"
+    target_col = "target" if "target" in cluster_results.columns else "target_gene"
+    source_col = "sources" if "sources" in cluster_results.columns else "gene_cluster"
+
+    edge_rows = []
+
+    for row in cluster_results.to_dict(orient="records"):
+        cluster_id = row.get(cluster_id_col)
+        target = row.get(target_col)
+        sources = row.get(source_col)
+
+        if sources is None or pd.isna(sources) or sources == "":
+            continue
+
+        if isinstance(sources, str):
+            genes = [gene.strip() for gene in sources.split(";") if gene and gene.strip()]
+        elif isinstance(sources, (list, tuple, set, np.ndarray, pd.Index)):
+            genes = [str(gene).strip() for gene in list(sources) if str(gene).strip()]
+        else:
+            genes = [str(sources).strip()]
+
+        for gene in genes:
+            if feature_importance is None:
+                fi_value = np.nan
+            else:
+                fi_value = feature_importance.get(gene, np.nan)
+                if fi_value is not None:
+                    fi_value = float(fi_value)
+
+            edge_rows.append({
+                "cluster_id": cluster_id,
+                "target": target,
+                "source": gene,
+                "fi_score": fi_value,
+            })
+
+    edge_df = pd.DataFrame(edge_rows, columns=["cluster_id", "target", "source", "fi_score"])
+
+    if edge_df.empty:
+        return edge_df
+
+    edge_df = edge_df.sort_values(
+        by=["cluster_id", "fi_score"],
+        ascending=[True, False],
+        na_position="last",
+        kind="mergesort",
+    ).reset_index(drop=True)
+
+    return edge_df
 
 
 def identify_coregulators(
